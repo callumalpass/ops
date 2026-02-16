@@ -1,9 +1,17 @@
 const path = require("node:path");
+const fs = require("node:fs");
 const { execFile } = require("node:child_process");
 const { promisify } = require("node:util");
 const vscode = require("vscode");
 
 const execFileAsync = promisify(execFile);
+const LOCK_ERROR_SNIPPET = "holds the lock";
+
+function sleep(ms) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
+}
 
 function escapeHtml(value) {
   return String(value)
@@ -29,10 +37,136 @@ function ensureJsonFormat(args) {
   return [...args, "--format", "json"];
 }
 
+function configuredCliPath() {
+  const configured = vscode.workspace.getConfiguration("opsExtension").get("cliPath");
+  if (typeof configured !== "string") {
+    return undefined;
+  }
+  const trimmed = configured.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function resolveOpsInvocation(workspaceFolder) {
+  const workspaceRoot = workspaceFolder.uri.fsPath;
+  const configured = configuredCliPath();
+  if (configured) {
+    const configuredPath = path.isAbsolute(configured) ? configured : path.join(workspaceRoot, configured);
+    if (configuredPath.toLowerCase().endsWith(".js")) {
+      return {
+        command: process.execPath,
+        argsPrefix: [configuredPath],
+        source: "settings",
+      };
+    }
+    return {
+      command: configuredPath,
+      argsPrefix: [],
+      source: "settings",
+    };
+  }
+
+  const localBin =
+    process.platform === "win32"
+      ? path.join(workspaceRoot, "node_modules", ".bin", "ops.cmd")
+      : path.join(workspaceRoot, "node_modules", ".bin", "ops");
+  if (fs.existsSync(localBin)) {
+    return {
+      command: localBin,
+      argsPrefix: [],
+      source: "workspace-bin",
+    };
+  }
+
+  const localScriptCandidates = [
+    path.join(workspaceRoot, "dist", "cli.js"),
+    path.join(workspaceRoot, "node_modules", "ops", "dist", "cli.js"),
+  ];
+  for (const scriptPath of localScriptCandidates) {
+    if (fs.existsSync(scriptPath)) {
+      return {
+        command: process.execPath,
+        argsPrefix: [scriptPath],
+        source: "workspace-script",
+      };
+    }
+  }
+
+  return {
+    command: "ops",
+    argsPrefix: [],
+    source: "path",
+  };
+}
+
+function renderCommand(command, args) {
+  return [command, ...args].map(shellQuote).join(" ");
+}
+
+function formatCliNotFoundError(invocation, workspaceFolder) {
+  const workspaceRoot = workspaceFolder.uri.fsPath;
+  const fromSetting = invocation.source === "settings";
+  const lines = [
+    `Unable to launch Ops CLI: ${invocation.command}`,
+    fromSetting
+      ? "The configured `opsExtension.cliPath` does not exist or is not executable."
+      : "Install `ops` on your PATH or configure `opsExtension.cliPath` in VS Code settings.",
+  ];
+  if (!fromSetting) {
+    lines.push(
+      `Checked workspace fallbacks in ${workspaceRoot}: node_modules/.bin/ops, dist/cli.js, node_modules/ops/dist/cli.js.`,
+    );
+  }
+  return lines.join("\n");
+}
+
+function normalizeDiagnosticFailure(error, commandLabel) {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.startsWith("Command failed:")) {
+    return `${commandLabel} exited non-zero. Run "${commandLabel}" in a terminal for details.`;
+  }
+  return message;
+}
+
+function parseJsonMaybe(value) {
+  if (typeof value !== "string") {
+    return undefined;
+  }
+  const trimmed = value.trim();
+  if (trimmed.length === 0) {
+    return undefined;
+  }
+  try {
+    return JSON.parse(trimmed);
+  } catch {
+    return undefined;
+  }
+}
+
+function folderHasOpsDirectory(folder) {
+  const root = folder.uri.fsPath;
+  return fs.existsSync(path.join(root, ".ops"));
+}
+
 function firstWorkspaceFolder() {
-  return vscode.workspace.workspaceFolders && vscode.workspace.workspaceFolders.length > 0
-    ? vscode.workspace.workspaceFolders[0]
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  if (folders.length === 0) {
+    return undefined;
+  }
+
+  const activeUri = vscode.window.activeTextEditor && vscode.window.activeTextEditor.document
+    ? vscode.window.activeTextEditor.document.uri
     : undefined;
+  const activeFolder = activeUri ? vscode.workspace.getWorkspaceFolder(activeUri) : undefined;
+  if (activeFolder && folderHasOpsDirectory(activeFolder)) {
+    return activeFolder;
+  }
+
+  const withOps = folders.find((folder) => folderHasOpsDirectory(folder));
+  if (withOps) {
+    return withOps;
+  }
+
+  return folders[0];
 }
 
 function payloadWorkspaceFolder(payload) {
@@ -80,45 +214,120 @@ class OpsClient {
   constructor(outputChannel) {
     this.outputChannel = outputChannel;
     this.terminal = undefined;
+    this.queue = Promise.resolve();
+  }
+
+  enqueue(task) {
+    const next = this.queue.then(task, task);
+    this.queue = next.catch(() => undefined);
+    return next;
+  }
+
+  async runExecWithRetries(command, args, options) {
+    const attempts = 40;
+    for (let attempt = 1; attempt <= attempts; attempt += 1) {
+      try {
+        return await execFileAsync(command, args, options);
+      } catch (error) {
+        if (!error || typeof error !== "object") {
+          throw error;
+        }
+        const err = error;
+        const stdout = typeof err.stdout === "string" ? err.stdout : "";
+        const stderr = typeof err.stderr === "string" ? err.stderr : "";
+        const message = typeof err.message === "string" ? err.message : "";
+        const combined = `${message}\n${stdout}\n${stderr}`;
+        const isLockError = combined.includes(LOCK_ERROR_SNIPPET);
+        if (!isLockError || attempt === attempts) {
+          throw error;
+        }
+        await sleep(Math.min(attempt * 100, 1000));
+      }
+    }
+    throw new Error("Failed to run ops command after retries.");
   }
 
   async runJson(args, workspaceFolder) {
-    if (!workspaceFolder) {
-      throw new Error("Open a workspace folder before running ops commands.");
-    }
-
-    const cwd = workspaceFolder.uri.fsPath;
-    const finalArgs = ensureJsonFormat(args);
-    this.outputChannel.appendLine(`$ ops ${finalArgs.map(shellQuote).join(" ")}`);
-
-    try {
-      const result = await execFileAsync("ops", finalArgs, {
-        cwd,
-        maxBuffer: 10 * 1024 * 1024,
-      });
-      if (result.stderr && result.stderr.trim().length > 0) {
-        this.outputChannel.appendLine(result.stderr.trimEnd());
+    return this.enqueue(async () => {
+      if (!workspaceFolder) {
+        throw new Error("Open a workspace folder before running ops commands.");
       }
+
+      const cwd = workspaceFolder.uri.fsPath;
+      const invocation = resolveOpsInvocation(workspaceFolder);
+      const finalArgs = ensureJsonFormat(args);
+      const commandArgs = [...invocation.argsPrefix, ...finalArgs];
+      this.outputChannel.appendLine(`$ ${renderCommand(invocation.command, commandArgs)}`);
 
       try {
-        return JSON.parse(result.stdout);
-      } catch {
-        throw new Error(`ops returned non-JSON output: ${result.stdout.trim()}`);
-      }
-    } catch (error) {
-      const details = [];
-      if (error && typeof error === "object") {
-        const err = error;
-        if (typeof err.message === "string") details.push(err.message);
-        if (typeof err.stdout === "string" && err.stdout.trim().length > 0) {
-          details.push(`stdout: ${err.stdout.trim()}`);
+        const result = await this.runExecWithRetries(invocation.command, commandArgs, {
+          cwd,
+          maxBuffer: 10 * 1024 * 1024,
+        });
+        if (result.stderr && result.stderr.trim().length > 0) {
+          this.outputChannel.appendLine(result.stderr.trimEnd());
         }
-        if (typeof err.stderr === "string" && err.stderr.trim().length > 0) {
-          details.push(`stderr: ${err.stderr.trim()}`);
+
+        try {
+          return JSON.parse(result.stdout);
+        } catch {
+          throw new Error(`ops returned non-JSON output: ${result.stdout.trim()}`);
         }
+      } catch (error) {
+        if (error && typeof error === "object") {
+          const err = error;
+          const parsedStdout = parseJsonMaybe(typeof err.stdout === "string" ? err.stdout : undefined);
+          if (parsedStdout !== undefined) {
+            if (typeof err.stderr === "string" && err.stderr.trim().length > 0) {
+              this.outputChannel.appendLine(err.stderr.trimEnd());
+            }
+            this.outputChannel.appendLine("[warn] ops exited non-zero but returned JSON; using stdout payload.");
+            return parsedStdout;
+          }
+        }
+
+        const details = [];
+        if (error && typeof error === "object") {
+          const err = error;
+          if (err.code === "ENOENT") {
+            throw new Error(formatCliNotFoundError(invocation, workspaceFolder));
+          }
+          if (typeof err.message === "string") details.push(err.message);
+          if (typeof err.stdout === "string" && err.stdout.trim().length > 0) {
+            details.push(`stdout: ${err.stdout.trim()}`);
+          }
+          if (typeof err.stderr === "string" && err.stderr.trim().length > 0) {
+            details.push(`stderr: ${err.stderr.trim()}`);
+          }
+          const combinedDetails = details.join("\n");
+          if (combinedDetails.includes(LOCK_ERROR_SNIPPET)) {
+            details.push("Another ops process is holding .ops/.lock too frequently. Close other VS Code windows using this repo and retry.");
+          }
+          if (
+            details.length === 1 &&
+            typeof err.message === "string" &&
+            err.message.startsWith("Command failed:")
+          ) {
+            const opsPath = path.join(cwd, ".ops");
+            if (!fs.existsSync(opsPath)) {
+              details.push(
+                `No .ops directory found in ${cwd}. Open the repo root or run "Ops: Initialize (.ops)".`,
+              );
+            } else {
+              details.push(
+                `Command exited non-zero with no output (cwd: ${cwd}). Check the Ops output channel for the full command.`,
+              );
+              details.push(
+                "Tip: run \"ops doctor --format json\". If it reports a NODE_MODULE_VERSION mismatch for better-sqlite3, rebuild or reinstall ops with the same Node.js runtime used by VS Code.",
+              );
+            }
+          }
+        }
+        const message = details.length > 0 ? details.join("\n") : String(error);
+        this.outputChannel.appendLine(`[error] ${message}`);
+        throw new Error(message);
       }
-      throw new Error(details.length > 0 ? details.join("\n") : String(error));
-    }
+    });
   }
 
   runInteractive(args, workspaceFolder) {
@@ -126,11 +335,17 @@ class OpsClient {
       throw new Error("Open a workspace folder before running ops commands.");
     }
 
+    const invocation = resolveOpsInvocation(workspaceFolder);
+    const commandArgs = [...invocation.argsPrefix, ...args];
+    const commandText = renderCommand(invocation.command, commandArgs);
+
     if (!this.terminal) {
-      this.terminal = vscode.window.createTerminal("ops");
+      this.terminal = vscode.window.createTerminal({
+        name: "ops",
+        cwd: workspaceFolder.uri.fsPath,
+      });
     }
 
-    const commandText = `ops ${args.map(shellQuote).join(" ")}`;
     this.outputChannel.appendLine(`$ ${commandText}`);
     this.terminal.show(true);
     this.terminal.sendText(commandText, true);
@@ -346,8 +561,24 @@ class DiagnosticsProvider {
 
     try {
       const [doctor, validate] = await Promise.all([
-        this.client.runJson(["doctor"], workspaceFolder),
-        this.client.runJson(["command", "validate"], workspaceFolder),
+        this.client.runJson(["doctor"], workspaceFolder).catch((error) => ({
+          ok: false,
+          checks: [
+            {
+              check: "ops doctor",
+              ok: false,
+              detail: normalizeDiagnosticFailure(error, "ops doctor --format json"),
+            },
+          ],
+        })),
+        this.client.runJson(["command", "validate"], workspaceFolder).catch((error) => ({
+          valid: false,
+          issues: [
+            {
+              message: normalizeDiagnosticFailure(error, "ops command validate --format json"),
+            },
+          ],
+        })),
       ]);
       this.doctor = doctor;
       this.validate = validate;
@@ -837,6 +1068,21 @@ function activate(context) {
   }, 300);
 
   const watcherDisposables = [];
+  const shouldRefreshForOpsUri = (folder, uri) => {
+    const opsRoot = path.join(folder.uri.fsPath, ".ops");
+    const rel = path.relative(opsRoot, uri.fsPath);
+    if (!rel || rel.startsWith("..") || path.isAbsolute(rel)) {
+      return false;
+    }
+    const normalizedRel = rel.split(path.sep).join("/");
+    if (normalizedRel === ".lock") {
+      return false;
+    }
+    if (normalizedRel === ".mdbase" || normalizedRel.startsWith(".mdbase/")) {
+      return false;
+    }
+    return true;
+  };
 
   const installWatchers = () => {
     for (const disposable of watcherDisposables.splice(0, watcherDisposables.length)) {
@@ -846,9 +1092,14 @@ function activate(context) {
     for (const folder of vscode.workspace.workspaceFolders ?? []) {
       const pattern = new vscode.RelativePattern(folder, ".ops/**/*");
       const watcher = vscode.workspace.createFileSystemWatcher(pattern);
-      watcher.onDidChange(refreshDebounced, undefined, context.subscriptions);
-      watcher.onDidCreate(refreshDebounced, undefined, context.subscriptions);
-      watcher.onDidDelete(refreshDebounced, undefined, context.subscriptions);
+      const onOpsChanged = (uri) => {
+        if (shouldRefreshForOpsUri(folder, uri)) {
+          refreshDebounced();
+        }
+      };
+      watcher.onDidChange(onOpsChanged, undefined, context.subscriptions);
+      watcher.onDidCreate(onOpsChanged, undefined, context.subscriptions);
+      watcher.onDidDelete(onOpsChanged, undefined, context.subscriptions);
       watcherDisposables.push(watcher);
       context.subscriptions.push(watcher);
     }

@@ -13,6 +13,8 @@ This extension wraps the `ops` CLI and provides:
 - A workspace folder with a repository root
 - `gh` auth configured when using issue/PR-backed commands
 
+If `ops` is not on your shell `PATH`, set `opsExtension.cliPath` in VS Code settings to the CLI executable path (or a `cli.js` path). Relative paths are resolved from the workspace root.
+
 ## Commands
 
 - `Ops: Initialize (.ops)`
