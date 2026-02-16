@@ -10,6 +10,25 @@ settings:
   rename_update_refs: true
 `;
 
+const OPS_CONFIG_YAML = `# Repository-level defaults for ops.
+# Precedence: CLI flags > command frontmatter > this file > built-in defaults.
+#
+# default_repo: your-org/your-repo
+# default_provider: github # github|gitlab|jira|azure
+default_cli: claude
+default_mode: interactive
+# default_model: sonnet
+# default_permission_mode: acceptEdits
+# default_allowed_tools: ["Read", "Edit"]
+# default_sandbox_mode: workspace-write
+# default_approval_policy: on-request
+
+commands:
+  triage_issue: triage-issue
+  address_issue: address-issue
+  review_pr: review-pr
+`;
+
 const COMMAND_TYPE = `---
 name: command
 strict: true
@@ -331,7 +350,18 @@ ops command list
 ops item ensure --issue 123
 ops run triage-issue --issue 123
 ops run address-issue --issue 123
+ops issue address --issue 123
 \`\`\`
+
+## Repo defaults
+
+Use \`config.yaml\` in this folder to set repository defaults for:
+
+- default agent CLI/model/mode
+- default provider and provider scope
+- default command IDs for triage/address/review flows
+
+CLI flags still override both command frontmatter and \`config.yaml\`.
 
 Useful variants:
 
@@ -339,6 +369,7 @@ Useful variants:
 ops run review-pr --pr 456 --interactive
 ops run triage-issue --issue 123 --non-interactive
 ops run address-issue --issue 123 --interactive
+ops issue address --issue 123
 ops command render triage-issue --issue 123
 ops item set --issue 123 --field local_status=in_progress
 ops item set --issue 123 --field priority=high --field difficulty=medium --field risk=medium
@@ -349,7 +380,7 @@ ops item set --issue 123 --field priority=high --field difficulty=medium --field
 - Templates use placeholders like \`{{title}}\` or \`{{title|fallback}}\`.
 - Context comes from:
   - explicit \`--var key=value\`
-  - live GitHub data (\`gh issue/pr view\`) when \`--issue\` or \`--pr\` is provided
+  - live provider data (for example GitHub/GitLab/Jira/Azure) when \`--issue\` or \`--pr\` is provided
   - existing sidecar fields in \`items/*.md\`
 - Commands typically ask agents to keep sidecar files updated as part of the workflow.
 
@@ -388,6 +419,7 @@ export async function scaffoldOps(opsRoot: string, force: boolean): Promise<{ cr
   const files: Array<{ path: string; content: string }> = [
     { path: ".gitignore", content: ".lock\n" },
     { path: "mdbase.yaml", content: MDBASE_YAML },
+    { path: "config.yaml", content: OPS_CONFIG_YAML },
     { path: "README.md", content: README },
     { path: "_types/command.md", content: COMMAND_TYPE },
     { path: "_types/item_state.md", content: ITEM_STATE_TYPE },

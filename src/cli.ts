@@ -7,6 +7,7 @@ import { registerCommandCommands } from "./commands/command.js";
 import { registerItemCommands } from "./commands/item.js";
 import { registerRun } from "./commands/run.js";
 import { registerTriage } from "./commands/triage.js";
+import { registerIssue } from "./commands/issue.js";
 import { registerHandoff } from "./commands/handoff.js";
 import { registerDoctor } from "./commands/doctor.js";
 
@@ -16,7 +17,7 @@ const pkg = require("../package.json") as { version?: string };
 const program = new Command();
 program
   .name("ops")
-  .description("Markdown-native operations CLI for GitHub and AI agents")
+  .description("Markdown-native operations CLI for software delivery providers and AI agents")
   .version(pkg.version ?? "0.0.0");
 
 registerInit(program);
@@ -24,6 +25,7 @@ registerCommandCommands(program);
 registerItemCommands(program);
 registerRun(program);
 registerTriage(program);
+registerIssue(program);
 registerHandoff(program);
 registerDoctor(program);
 

@@ -1,11 +1,13 @@
 import { Command } from "commander";
 import chalk from "chalk";
-import { fetchItem } from "../lib/github.js";
-import { readItem, updateItemFields, upsertItemFromGitHub } from "../lib/ops-data.js";
+import { loadOpsConfig } from "../lib/config.js";
+import { fetchProviderItem } from "../lib/providers/index.js";
+import { readItem, updateItemFields, upsertItemFromProvider } from "../lib/ops-data.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
+import type { ProviderId } from "../lib/types.js";
 
 function makeWhere(opts: { kind?: string; status?: string; priority?: string; difficulty?: string }): string | undefined {
   const clauses: string[] = [];
@@ -37,28 +39,37 @@ export function registerItemCommands(program: Command): void {
 
   item
     .command("ensure")
-    .description("Create or refresh sidecar from GitHub")
+    .description("Create or refresh sidecar from the configured provider")
     .option("--repo-root <path>", "Repository root")
     .option("--format <format>", "text|json", "text")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
-    .option("--repo <owner/repo>", "GitHub repo override")
+    .option("--repo <scope>", "Provider scope override (for example owner/repo)")
+    .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .action(async (opts) => {
       try {
         const target = resolveTarget(opts);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
+        const config = await loadOpsConfig(repoRoot);
+        const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const ghItem = await fetchItem(target.kind, target.number, repoRoot, opts.repo);
-          const path = await upsertItemFromGitHub(collection, ghItem);
+          const remoteItem = await fetchProviderItem(
+            target.kind,
+            target.number,
+            repoRoot,
+            opts.repo ?? config.default_repo,
+            provider,
+          );
+          const path = await upsertItemFromProvider(collection, remoteItem);
           if (opts.format === "json") {
             console.log(JSON.stringify({
               status: "updated",
               path,
               kind: target.kind,
               number: target.number,
-              repo: ghItem.repo,
+              repo: remoteItem.repo,
             }, null, 2));
             return;
           }

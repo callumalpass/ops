@@ -7,11 +7,13 @@ import { parseKeyValuePairs } from "../lib/parse.js";
 import { commandPath } from "../lib/paths.js";
 import { prepareRun } from "../lib/executor.js";
 import { listCommands, getCommandById } from "../lib/ops-data.js";
+import { loadOpsConfig } from "../lib/config.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { writeFileForce } from "../lib/fs.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
+import type { ProviderId } from "../lib/types.js";
 
 function defaultName(id: string): string {
   return id
@@ -103,6 +105,8 @@ export function registerCommandCommands(program: Command): void {
     .option("--mode <mode>", "interactive|non-interactive", "interactive")
     .option("--model <model>", "Default model")
     .option("--permission-mode <mode>", "Default permission mode")
+    .option("--sandbox-mode <mode>", "Default sandbox mode (codex): read-only|workspace-write|danger-full-access")
+    .option("--approval-policy <policy>", "Default approval policy (codex): untrusted|on-failure|on-request|never")
     .option("--allowed-tool <tool>", "Allowed tool (repeatable)", collect, [])
     .option("--template-file <path>", "Read markdown body from file")
     .option("--force", "Overwrite if existing")
@@ -130,6 +134,8 @@ export function registerCommandCommands(program: Command): void {
 
         if (opts.model) frontmatter.model = opts.model;
         if (opts.permissionMode) frontmatter.permission_mode = opts.permissionMode;
+        if (opts.sandboxMode) frontmatter.sandbox_mode = opts.sandboxMode;
+        if (opts.approvalPolicy) frontmatter.approval_policy = opts.approvalPolicy;
         if (Array.isArray(opts.allowedTool) && opts.allowedTool.length > 0) {
           frontmatter.allowed_tools = opts.allowedTool;
         }
@@ -216,7 +222,8 @@ export function registerCommandCommands(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
-    .option("--repo <owner/repo>", "GitHub repo override")
+    .option("--repo <scope>", "Provider scope override (for example owner/repo)")
+    .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--var <key=value>", "Template variable override", collect, [])
     .option("--show-context", "Print merged context")
     .option("--format <format>", "text|json", "text")
@@ -228,6 +235,8 @@ export function registerCommandCommands(program: Command): void {
 
         const vars = parseKeyValuePairs(opts.var ?? [], false);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
+        const config = await loadOpsConfig(repoRoot);
+        const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
@@ -240,7 +249,8 @@ export function registerCommandCommands(program: Command): void {
             commandId: id,
             kind,
             number,
-            repo: opts.repo,
+            repo: opts.repo ?? config.default_repo,
+            provider,
             vars,
             ensureSidecar: false,
           });

@@ -3,6 +3,8 @@ import chalk from "chalk";
 import { resolveRepoRoot, resolveOpsRootMaybe } from "../lib/runtime.js";
 import { openCollection } from "../lib/store.js";
 import { execCapture } from "../lib/process.js";
+import { loadOpsConfig } from "../lib/config.js";
+import type { ProviderId } from "../lib/types.js";
 
 interface CheckResult {
   check: string;
@@ -44,6 +46,94 @@ async function checkGhAuth(cwd: string): Promise<CheckResult> {
   }
 }
 
+function checkEnvPresent(name: string, label?: string): CheckResult {
+  const value = process.env[name];
+  const ok = typeof value === "string" && value.trim().length > 0;
+  return {
+    check: label ?? `${name} set`,
+    ok,
+    detail: ok ? "present" : `missing ${name}`,
+  };
+}
+
+function checkAnyEnvPresent(names: string[], label: string): CheckResult {
+  const ok = names.some((name) => {
+    const value = process.env[name];
+    return typeof value === "string" && value.trim().length > 0;
+  });
+  return {
+    check: label,
+    ok,
+    detail: ok ? "present" : `missing one of: ${names.join(", ")}`,
+  };
+}
+
+function checkAzureScope(defaultRepo?: string): CheckResult {
+  if (defaultRepo && defaultRepo.trim().length > 0) {
+    return {
+      check: "azure scope",
+      ok: true,
+      detail: `from default_repo (${defaultRepo})`,
+    };
+  }
+
+  const org = process.env.AZURE_ORG?.trim();
+  const project = process.env.AZURE_PROJECT?.trim();
+  if (org && project) {
+    return {
+      check: "azure scope",
+      ok: true,
+      detail: "from AZURE_ORG/AZURE_PROJECT",
+    };
+  }
+
+  return {
+    check: "azure scope",
+    ok: false,
+    detail: "set default_repo or AZURE_ORG/AZURE_PROJECT",
+  };
+}
+
+async function providerChecks(provider: ProviderId, cwd: string, defaultRepo?: string): Promise<CheckResult[]> {
+  if (provider === "github") {
+    return [
+      await checkCommandAvailable("gh", cwd),
+      await checkGhAuth(cwd),
+    ];
+  }
+
+  if (provider === "gitlab") {
+    return [
+      checkEnvPresent("GITLAB_TOKEN"),
+      {
+        check: "GITLAB_BASE_URL",
+        ok: true,
+        detail: process.env.GITLAB_BASE_URL?.trim() ? "custom base URL set" : "using https://gitlab.com",
+      },
+    ];
+  }
+
+  if (provider === "jira") {
+    return [
+      checkEnvPresent("JIRA_BASE_URL"),
+      checkEnvPresent("JIRA_API_TOKEN"),
+      checkAnyEnvPresent(["JIRA_EMAIL", "JIRA_USER"], "jira user identity"),
+      {
+        check: "jira project key",
+        ok: true,
+        detail: (defaultRepo && defaultRepo.trim())
+          ? `from default_repo (${defaultRepo})`
+          : (process.env.JIRA_PROJECT?.trim() ? "from JIRA_PROJECT" : "not set (optional; needed for KEY-123 style lookups)"),
+      },
+    ];
+  }
+
+  return [
+    checkEnvPresent("AZURE_DEVOPS_PAT"),
+    checkAzureScope(defaultRepo),
+  ];
+}
+
 async function checkOpsCollection(opsRoot: string): Promise<CheckResult> {
   try {
     const collection = await openCollection(opsRoot);
@@ -81,25 +171,28 @@ export function registerDoctor(program: Command): void {
     .action(async (opts) => {
       const repoRoot = resolveRepoRoot(opts.repoRoot);
       const ops = resolveOpsRootMaybe(repoRoot);
+      const config = await loadOpsConfig(repoRoot);
+      const provider = config.default_provider ?? "github";
 
-      const checks = await Promise.all([
+      const [opsCheck, claudeCheck, codexCheck, ...providerSpecific] = await Promise.all([
         checkOpsCollection(ops),
-        checkCommandAvailable("gh", repoRoot),
-        checkGhAuth(repoRoot),
         checkCommandAvailable("claude", repoRoot),
         checkCommandAvailable("codex", repoRoot),
+        ...await providerChecks(provider, repoRoot, config.default_repo),
       ]);
+      const checks = [opsCheck, ...providerSpecific, claudeCheck, codexCheck];
 
       const ok = checks.every((c) => c.ok);
 
       if (opts.format === "json") {
-        console.log(JSON.stringify({ ok, repo_root: repoRoot, ops_root: ops, checks }, null, 2));
+        console.log(JSON.stringify({ ok, provider, repo_root: repoRoot, ops_root: ops, checks }, null, 2));
         process.exit(ok ? 0 : 1);
       }
 
       console.log(chalk.bold("ops doctor"));
       console.log(chalk.dim(`repo: ${repoRoot}`));
       console.log(chalk.dim(`ops:  ${ops}`));
+      console.log(chalk.dim(`provider: ${provider}`));
       console.log();
 
       for (const check of checks) {

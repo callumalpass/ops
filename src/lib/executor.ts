@@ -3,7 +3,7 @@ import { runAgent } from "./agents.js";
 import { buildContext } from "./context-builder.js";
 import { getCommandById } from "./ops-data.js";
 import { renderTemplate } from "./template.js";
-import type { AgentCli, ApprovalPolicy, ItemKind, RunMode, SandboxMode } from "./types.js";
+import type { AgentCli, ApprovalPolicy, ItemKind, ProviderId, RunMode, SandboxMode } from "./types.js";
 
 export interface PrepareRunInput {
   collection: Collection;
@@ -12,6 +12,7 @@ export interface PrepareRunInput {
   kind?: ItemKind;
   number?: number;
   repo?: string;
+  provider?: ProviderId;
   vars?: Record<string, unknown>;
   ensureSidecar: boolean;
 }
@@ -32,6 +33,7 @@ export async function prepareRun(input: PrepareRunInput): Promise<PreparedRun> {
     kind: input.kind,
     number: input.number,
     repo: input.repo,
+    provider: input.provider,
     explicitVars: input.vars,
     ensureSidecar: input.ensureSidecar,
   });
@@ -54,6 +56,15 @@ export interface ExecuteRunInput extends PrepareRunInput {
   allowedTools?: string[];
   sandboxMode?: SandboxMode;
   approvalPolicy?: ApprovalPolicy;
+  defaults?: {
+    mode?: RunMode;
+    cli?: AgentCli;
+    model?: string;
+    permissionMode?: string;
+    allowedTools?: string[];
+    sandboxMode?: SandboxMode;
+    approvalPolicy?: ApprovalPolicy;
+  };
 }
 
 export async function executeRun(input: ExecuteRunInput): Promise<{
@@ -61,6 +72,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<{
   stdout: string;
   stderr: string;
   prompt: string;
+  mode: RunMode;
 }> {
   const prepared = await prepareRun(input);
   if (prepared.missingRequired.length > 0) {
@@ -70,19 +82,20 @@ export async function executeRun(input: ExecuteRunInput): Promise<{
   }
 
   const fm = prepared.command.frontmatter;
-  const mode: RunMode = input.mode ?? fm.default_mode ?? "interactive";
-  const cli: AgentCli = input.cli ?? fm.cli_type ?? "claude";
+  const defaults = input.defaults ?? {};
+  const mode: RunMode = input.mode ?? fm.default_mode ?? defaults.mode ?? "interactive";
+  const cli: AgentCli = input.cli ?? fm.cli_type ?? defaults.cli ?? "claude";
 
   const result = await runAgent({
     cli,
     mode,
     prompt: prepared.renderedPrompt,
     cwd: input.repoRoot,
-    model: input.model ?? fm.model,
-    permissionMode: input.permissionMode ?? fm.permission_mode,
-    allowedTools: input.allowedTools ?? fm.allowed_tools,
-    sandboxMode: input.sandboxMode ?? fm.sandbox_mode,
-    approvalPolicy: input.approvalPolicy ?? fm.approval_policy,
+    model: input.model ?? fm.model ?? defaults.model,
+    permissionMode: input.permissionMode ?? fm.permission_mode ?? defaults.permissionMode,
+    allowedTools: input.allowedTools ?? fm.allowed_tools ?? defaults.allowedTools,
+    sandboxMode: input.sandboxMode ?? fm.sandbox_mode ?? defaults.sandboxMode,
+    approvalPolicy: input.approvalPolicy ?? fm.approval_policy ?? defaults.approvalPolicy,
   });
 
   return {
@@ -90,5 +103,6 @@ export async function executeRun(input: ExecuteRunInput): Promise<{
     stdout: result.stdout,
     stderr: result.stderr,
     prompt: prepared.renderedPrompt,
+    mode,
   };
 }

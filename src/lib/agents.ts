@@ -59,6 +59,7 @@ function buildNonInteractiveCommand(input: AgentRunInput): AgentCommand {
   const args: string[] = ["exec", "-"];
   if (input.model) args.push("-m", input.model);
   if (input.sandboxMode) args.push("-s", input.sandboxMode);
+  if (input.approvalPolicy) args.push("-a", input.approvalPolicy);
   args.push("-C", input.cwd);
   return { cmd: "codex", args, cwd: input.cwd, stdin: input.prompt };
 }

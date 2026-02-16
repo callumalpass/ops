@@ -1,6 +1,7 @@
 export type AgentCli = "claude" | "codex";
 export type RunMode = "interactive" | "non-interactive";
 export type ItemKind = "issue" | "pr";
+export type ProviderId = "github" | "gitlab" | "jira" | "azure";
 
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
@@ -25,15 +26,16 @@ export interface CommandRecord {
   };
 }
 
-export interface GitHubLabel {
+export interface RemoteLabel {
   name: string;
 }
 
-export interface GitHubUser {
+export interface RemoteUser {
   login: string;
 }
 
-export interface GitHubItem {
+export interface RemoteItem {
+  provider?: ProviderId;
   kind: ItemKind;
   repo: string;
   number: number;
@@ -42,12 +44,17 @@ export interface GitHubItem {
   author: string;
   state: string;
   url: string;
-  labels: GitHubLabel[];
-  assignees: GitHubUser[];
+  labels: RemoteLabel[];
+  assignees: RemoteUser[];
   updatedAt: string;
   headRefName?: string;
   baseRefName?: string;
 }
+
+// Backwards-compatible aliases while provider abstraction is phased in.
+export type GitHubLabel = RemoteLabel;
+export type GitHubUser = RemoteUser;
+export type GitHubItem = RemoteItem;
 
 export interface RenderResult {
   text: string;

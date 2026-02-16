@@ -1,6 +1,6 @@
 import type { Collection } from "@callumalpass/mdbase";
 import { itemPath } from "./paths.js";
-import type { CommandRecord, GitHubItem } from "./types.js";
+import type { CommandRecord, RemoteItem } from "./types.js";
 
 function escapeExpr(value: string): string {
   return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
@@ -51,9 +51,10 @@ export async function listCommands(collection: Collection): Promise<CommandRecor
   }));
 }
 
-export async function upsertItemFromGitHub(collection: Collection, item: GitHubItem): Promise<string> {
+export async function upsertItemFromProvider(collection: Collection, item: RemoteItem): Promise<string> {
   const path = itemPath(item.kind, item.number);
-  const id = `github:${item.repo}:${item.kind}:${item.number}`;
+  const provider = item.provider ?? "github";
+  const id = `${provider}:${item.repo}:${item.kind}:${item.number}`;
 
   const remoteFields: Record<string, unknown> = {
     id,
@@ -92,6 +93,9 @@ export async function upsertItemFromGitHub(collection: Collection, item: GitHubI
   }
   return path;
 }
+
+// Backwards-compatible alias while call sites migrate.
+export const upsertItemFromGitHub = upsertItemFromProvider;
 
 export async function readItem(collection: Collection, kind: "issue" | "pr", number: number): Promise<{
   path: string;

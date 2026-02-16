@@ -1,10 +1,11 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { executeRun, prepareRun } from "../lib/executor.js";
+import { loadOpsConfig } from "../lib/config.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
-import type { AgentCli, ApprovalPolicy, ItemKind, RunMode, SandboxMode } from "../lib/types.js";
+import type { AgentCli, ApprovalPolicy, ItemKind, ProviderId, RunMode, SandboxMode } from "../lib/types.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
 
@@ -33,7 +34,8 @@ export function registerRun(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
-    .option("--repo <owner/repo>", "GitHub repo override")
+    .option("--repo <scope>", "Provider scope override (for example owner/repo)")
+    .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--mode <mode>", "interactive|non-interactive")
     .option("--interactive", "Alias for --mode interactive")
     .option("--non-interactive", "Alias for --mode non-interactive")
@@ -51,12 +53,15 @@ export function registerRun(program: Command): void {
       try {
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
+        const config = await loadOpsConfig(repoRoot);
         const vars = parseKeyValuePairs(opts.var ?? [], false);
         const target = pickTarget(opts);
 
         let mode: RunMode | undefined = opts.mode;
         if (opts.interactive) mode = "interactive";
         if (opts.nonInteractive) mode = "non-interactive";
+        const repo = opts.repo ?? config.default_repo;
+        const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
 
         const cli = opts.cli as AgentCli | undefined;
         const allowedTools = Array.isArray(opts.allowedTool) && opts.allowedTool.length > 0
@@ -71,7 +76,8 @@ export function registerRun(program: Command): void {
               commandId,
               kind: target.kind,
               number: target.number,
-              repo: opts.repo,
+              repo,
+              provider,
               vars,
               ensureSidecar: true,
             });
@@ -98,7 +104,8 @@ export function registerRun(program: Command): void {
               commandId,
               kind: target.kind,
               number: target.number,
-              repo: opts.repo,
+              repo,
+              provider,
               vars,
               ensureSidecar: true,
             });
@@ -118,7 +125,8 @@ export function registerRun(program: Command): void {
             commandId,
             kind: target.kind,
             number: target.number,
-            repo: opts.repo,
+            repo,
+            provider,
             vars,
             ensureSidecar: true,
             mode,
@@ -128,6 +136,15 @@ export function registerRun(program: Command): void {
             allowedTools,
             sandboxMode: opts.sandbox as SandboxMode | undefined,
             approvalPolicy: opts.approvalPolicy as ApprovalPolicy | undefined,
+            defaults: {
+              mode: config.default_mode,
+              cli: config.default_cli,
+              model: config.default_model,
+              permissionMode: config.default_permission_mode,
+              allowedTools: config.default_allowed_tools,
+              sandboxMode: config.default_sandbox_mode,
+              approvalPolicy: config.default_approval_policy,
+            },
           });
 
           if (opts.format === "json") {
@@ -136,7 +153,7 @@ export function registerRun(program: Command): void {
               stdout: result.stdout,
               stderr: result.stderr,
             }, null, 2));
-          } else if (mode === "non-interactive" || opts.nonInteractive) {
+          } else if (result.mode === "non-interactive") {
             if (result.stdout.trim()) {
               process.stdout.write(result.stdout.endsWith("\n") ? result.stdout : `${result.stdout}\n`);
             }
