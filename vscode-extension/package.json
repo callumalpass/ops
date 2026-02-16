@@ -1,0 +1,168 @@
+{
+  "name": "ops-vscode",
+  "displayName": "Ops",
+  "description": "VS Code extension for ops markdown-native workflows",
+  "version": "0.1.0",
+  "publisher": "local",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.88.0"
+  },
+  "scripts": {
+    "clean": "rm -rf dist",
+    "lint": "node --check extension.js",
+    "build": "npm run clean && node ./scripts/build.mjs",
+    "package": "npm run build && vsce package",
+    "publish:marketplace": "npm run build && vsce publish",
+    "publish:openvsx": "npm run build && npx ovsx publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.2",
+    "ovsx": "^0.11.3"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onView:ops.commandsView",
+    "onView:ops.itemsView",
+    "onView:ops.handoffsView",
+    "onView:ops.diagnosticsView",
+    "onCommand:opsExtension.init",
+    "onCommand:opsExtension.doctor",
+    "onCommand:opsExtension.ensureItemSidecar",
+    "onCommand:opsExtension.triageIssue",
+    "onCommand:opsExtension.reviewPr",
+    "onCommand:opsExtension.createHandoff"
+  ],
+  "main": "./dist/extension.js",
+  "files": [
+    "dist/**",
+    "media/**",
+    "README.md",
+    "LICENSE"
+  ],
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "ops",
+          "title": "Ops",
+          "icon": "media/ops.svg"
+        }
+      ]
+    },
+    "views": {
+      "ops": [
+        {
+          "id": "ops.commandsView",
+          "name": "Commands"
+        },
+        {
+          "id": "ops.itemsView",
+          "name": "Items"
+        },
+        {
+          "id": "ops.handoffsView",
+          "name": "Handoffs"
+        },
+        {
+          "id": "ops.diagnosticsView",
+          "name": "Diagnostics"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "opsExtension.refresh",
+        "title": "Ops: Refresh"
+      },
+      {
+        "command": "opsExtension.refreshDiagnostics",
+        "title": "Ops: Refresh Diagnostics"
+      },
+      {
+        "command": "opsExtension.init",
+        "title": "Ops: Initialize (.ops)"
+      },
+      {
+        "command": "opsExtension.doctor",
+        "title": "Ops: Doctor"
+      },
+      {
+        "command": "opsExtension.ensureItemSidecar",
+        "title": "Ops: Ensure Item Sidecar"
+      },
+      {
+        "command": "opsExtension.triageIssue",
+        "title": "Ops: Triage Issue"
+      },
+      {
+        "command": "opsExtension.reviewPr",
+        "title": "Ops: Review PR"
+      },
+      {
+        "command": "opsExtension.createHandoff",
+        "title": "Ops: Create Handoff"
+      },
+      {
+        "command": "opsExtension.openItemDetails",
+        "title": "Ops: Open Item Details"
+      },
+      {
+        "command": "opsExtension.openRelativeOpsFile",
+        "title": "Ops: Open Ops File"
+      },
+      {
+        "command": "opsExtension.openHandoffFile",
+        "title": "Ops: Open Handoff File"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "opsExtension.refresh",
+          "when": "view == ops.commandsView",
+          "group": "navigation"
+        },
+        {
+          "command": "opsExtension.refresh",
+          "when": "view == ops.itemsView",
+          "group": "navigation"
+        },
+        {
+          "command": "opsExtension.refresh",
+          "when": "view == ops.handoffsView",
+          "group": "navigation"
+        },
+        {
+          "command": "opsExtension.refreshDiagnostics",
+          "when": "view == ops.diagnosticsView",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "opsExtension.openRelativeOpsFile",
+          "when": "view == ops.commandsView && viewItem == opsCommand",
+          "group": "inline"
+        },
+        {
+          "command": "opsExtension.openItemDetails",
+          "when": "view == ops.itemsView && viewItem == opsItem",
+          "group": "inline"
+        },
+        {
+          "command": "opsExtension.ensureItemSidecar",
+          "when": "view == ops.itemsView && viewItem == opsItem",
+          "group": "navigation"
+        },
+        {
+          "command": "opsExtension.openHandoffFile",
+          "when": "view == ops.handoffsView && viewItem == opsHandoff",
+          "group": "inline"
+        }
+      ]
+    }
+  }
+}
