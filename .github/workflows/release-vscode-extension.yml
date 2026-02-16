@@ -1,0 +1,95 @@
+name: Release VS Code Extension
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-vscode-extension-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: package-lock.json
+
+      - name: Install root dependencies
+        run: npm ci
+
+      - name: Install extension dependencies
+        run: npm install --prefix vscode-extension
+
+      - name: Build extension
+        run: npm run build:extension
+
+      - name: Package extension VSIX
+        run: npm --prefix vscode-extension run package
+
+      - name: Resolve VSIX path
+        id: vsix
+        shell: bash
+        run: |
+          set -euo pipefail
+          VSIX_PATH="$(ls -1 vscode-extension/*.vsix | head -n 1)"
+          if [[ -z "${VSIX_PATH}" ]]; then
+            echo "No VSIX artifact found in vscode-extension/"
+            exit 1
+          fi
+          echo "path=${VSIX_PATH}" >> "$GITHUB_OUTPUT"
+
+      - name: Compute release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG="${GITHUB_REF#refs/tags/}"
+            NAME="Ops VS Code Extension ${TAG}"
+            PRERELEASE=false
+            GENERATE_NOTES=true
+            BODY="Automated VS Code extension release for ${TAG}."
+          else
+            TAG="edge"
+            NAME="Ops VS Code Extension (edge)"
+            PRERELEASE=true
+            GENERATE_NOTES=false
+            BODY="Automated edge build from ${GITHUB_SHA}."
+          fi
+
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+          echo "prerelease=${PRERELEASE}" >> "$GITHUB_OUTPUT"
+          echo "generate_notes=${GENERATE_NOTES}" >> "$GITHUB_OUTPUT"
+          echo "body=${BODY}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.name }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
+          generate_release_notes: ${{ steps.meta.outputs.generate_notes }}
+          body: ${{ steps.meta.outputs.body }}
+          files: ${{ steps.vsix.outputs.path }}
+          overwrite_files: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
