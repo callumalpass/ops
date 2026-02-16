@@ -53,7 +53,23 @@ export async function execInteractive(command: string, args: string[], cwd: stri
       env: process.env,
     });
 
-    child.on("error", reject);
-    child.on("close", (code) => resolve(code ?? 1));
+    // Forward signals to the child so cleanup happens on Ctrl+C / kill.
+    const forwardSignal = (signal: NodeJS.Signals) => {
+      child.kill(signal);
+    };
+    process.on("SIGINT", forwardSignal);
+    process.on("SIGTERM", forwardSignal);
+
+    child.on("error", (err) => {
+      process.off("SIGINT", forwardSignal);
+      process.off("SIGTERM", forwardSignal);
+      reject(err);
+    });
+
+    child.on("close", (code) => {
+      process.off("SIGINT", forwardSignal);
+      process.off("SIGTERM", forwardSignal);
+      resolve(code ?? 1);
+    });
   });
 }
