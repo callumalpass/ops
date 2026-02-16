@@ -1,22 +1,25 @@
 import { Command } from "commander";
 import chalk from "chalk";
+import type { Collection } from "@callumalpass/mdbase";
 import { handoffPath } from "../lib/paths.js";
 import { readItem } from "../lib/ops-data.js";
-import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
-
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
+import { collect } from "../lib/cli-utils.js";
 
 function makeId(prefix: string): string {
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   return `${prefix}-${stamp}`;
 }
 
-async function findHandoffById(collection: any, id: string): Promise<any> {
+interface HandoffRow {
+  path: string;
+  body?: string;
+  frontmatter: Record<string, unknown>;
+}
+
+async function findHandoffById(collection: Collection, id: string): Promise<HandoffRow> {
   const where = `id == "${id.replace(/\\/g, "\\\\").replace(/"/g, '\\"')}"`;
   const result = await collection.query({
     types: ["handoff"],
@@ -33,7 +36,12 @@ async function findHandoffById(collection: any, id: string): Promise<any> {
   if (result.results.length > 1) {
     throw new Error(`Handoff '${id}' is not unique.`);
   }
-  return result.results[0];
+  const row = result.results[0];
+  return {
+    path: String(row.path),
+    frontmatter: (row.frontmatter ?? {}) as Record<string, unknown>,
+    body: typeof row.body === "string" ? row.body : undefined,
+  };
 }
 
 export function registerHandoff(program: Command): void {
@@ -43,6 +51,7 @@ export function registerHandoff(program: Command): void {
     .command("create")
     .description("Create a handoff linked to an item")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .option("--id <id>", "Handoff id")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
@@ -97,6 +106,17 @@ export function registerHandoff(program: Command): void {
             throw new Error(createResult.error.message);
           }
 
+          if (opts.format === "json") {
+            console.log(JSON.stringify({
+              status: "created",
+              id,
+              path: `handoffs/${id}.md`,
+              item_id: itemId,
+              for_agent: opts.forAgent,
+            }, null, 2));
+            return;
+          }
+
           console.log(chalk.green(`created handoffs/${id}.md`));
         });
       } catch (error) {
@@ -122,7 +142,6 @@ export function registerHandoff(program: Command): void {
             types: ["handoff"],
             where,
             order_by: [{ field: "created_at", direction: "desc" }],
-            limit: 200,
           });
           if (result.error) throw new Error(result.error.message);
 
@@ -186,6 +205,7 @@ export function registerHandoff(program: Command): void {
     .command("close <id>")
     .description("Mark handoff status as closed")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .action(async (id: string, opts) => {
       try {
         const repoRoot = resolveRepoRoot(opts.repoRoot);
@@ -202,6 +222,14 @@ export function registerHandoff(program: Command): void {
           });
           if (update.error) {
             throw new Error(update.error.message);
+          }
+          if (opts.format === "json") {
+            console.log(JSON.stringify({
+              status: "closed",
+              id,
+              path,
+            }, null, 2));
+            return;
           }
           console.log(chalk.green(`closed ${id}`));
         });

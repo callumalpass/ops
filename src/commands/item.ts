@@ -7,11 +7,12 @@ import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
 
-function makeWhere(opts: { kind?: string; status?: string; priority?: string }): string | undefined {
+function makeWhere(opts: { kind?: string; status?: string; priority?: string; difficulty?: string }): string | undefined {
   const clauses: string[] = [];
   if (opts.kind) clauses.push(`kind == "${opts.kind.replace(/"/g, '\\"')}"`);
   if (opts.status) clauses.push(`local_status == "${opts.status.replace(/"/g, '\\"')}"`);
   if (opts.priority) clauses.push(`priority == "${opts.priority.replace(/"/g, '\\"')}"`);
+  if (opts.difficulty) clauses.push(`difficulty == "${opts.difficulty.replace(/"/g, '\\"')}"`);
   if (clauses.length === 0) return undefined;
   return clauses.join(" && ");
 }
@@ -38,6 +39,7 @@ export function registerItemCommands(program: Command): void {
     .command("ensure")
     .description("Create or refresh sidecar from GitHub")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
     .option("--repo <owner/repo>", "GitHub repo override")
@@ -50,6 +52,16 @@ export function registerItemCommands(program: Command): void {
         await withCollection(ops, async (collection) => {
           const ghItem = await fetchItem(target.kind, target.number, repoRoot, opts.repo);
           const path = await upsertItemFromGitHub(collection, ghItem);
+          if (opts.format === "json") {
+            console.log(JSON.stringify({
+              status: "updated",
+              path,
+              kind: target.kind,
+              number: target.number,
+              repo: ghItem.repo,
+            }, null, 2));
+            return;
+          }
           console.log(chalk.green(`updated ${path}`));
         });
       } catch (error) {
@@ -65,13 +77,19 @@ export function registerItemCommands(program: Command): void {
     .option("--kind <kind>", "issue|pr")
     .option("--status <status>", "Filter by local_status")
     .option("--priority <priority>", "Filter by priority")
+    .option("--difficulty <difficulty>", "Filter by difficulty")
     .option("--format <format>", "text|json", "text")
     .action(async (opts) => {
       try {
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
         await withCollection(ops, async (collection) => {
-          const where = makeWhere({ kind: opts.kind, status: opts.status, priority: opts.priority });
+          const where = makeWhere({
+            kind: opts.kind,
+            status: opts.status,
+            priority: opts.priority,
+            difficulty: opts.difficulty,
+          });
           const result = await collection.query({
             types: ["item_state"],
             where,
@@ -79,7 +97,6 @@ export function registerItemCommands(program: Command): void {
               { field: "kind", direction: "asc" },
               { field: "number", direction: "asc" },
             ],
-            limit: 1000,
           });
 
           if (result.error) {
@@ -104,7 +121,8 @@ export function registerItemCommands(program: Command): void {
             const state = String(fm.local_status ?? "new");
             const title = String(fm.remote_title ?? "");
             const priority = fm.priority ? ` ${chalk.yellow(`[${String(fm.priority)}]`)}` : "";
-            console.log(`${chalk.bold(kind)} #${number} ${chalk.dim(state)}${priority}`);
+            const difficulty = fm.difficulty ? ` ${chalk.magenta(`{${String(fm.difficulty)}}`)}` : "";
+            console.log(`${chalk.bold(kind)} #${number} ${chalk.dim(state)}${priority}${difficulty}`);
             if (title) console.log(`  ${title}`);
           }
         });
@@ -153,6 +171,7 @@ export function registerItemCommands(program: Command): void {
     .command("set")
     .description("Set one or more sidecar fields")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
     .option("--field <key=value>", "Field assignment", (value: string, prev: string[]) => prev.concat([value]), [])
@@ -169,6 +188,16 @@ export function registerItemCommands(program: Command): void {
 
         await withCollection(ops, async (collection) => {
           const path = await updateItemFields(collection, target.kind, target.number, fields);
+          if (opts.format === "json") {
+            console.log(JSON.stringify({
+              status: "updated",
+              path,
+              kind: target.kind,
+              number: target.number,
+              fields,
+            }, null, 2));
+            return;
+          }
           console.log(chalk.green(`updated ${path}`));
         });
       } catch (error) {

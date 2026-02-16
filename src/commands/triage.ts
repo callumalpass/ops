@@ -4,10 +4,7 @@ import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
-
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
+import { collect } from "../lib/cli-utils.js";
 
 export function registerTriage(program: Command): void {
   program
@@ -38,7 +35,7 @@ export function registerTriage(program: Command): void {
 
         const commandId = opts.command || (kind === "issue" ? "triage-issue" : "review-pr");
         const mode = opts.nonInteractive ? "non-interactive" : opts.interactive ? "interactive" : undefined;
-        const vars = parseKeyValuePairs(opts.var ?? []);
+        const vars = parseKeyValuePairs(opts.var ?? [], false);
 
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);

@@ -10,6 +10,7 @@ export function registerInit(program: Command): void {
     .command("init")
     .description("Initialize .ops at repository root")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .option("--force", "Overwrite managed files")
     .action(async (opts) => {
       try {
@@ -19,6 +20,17 @@ export function registerInit(program: Command): void {
 
         // Validate that the fresh collection opens and types load.
         await withCollection(root, async () => undefined);
+
+        if (opts.format === "json") {
+          console.log(JSON.stringify({
+            status: "initialized",
+            repo_root: repoRoot,
+            ops_root: root,
+            created: result.created,
+            skipped: result.skipped,
+          }, null, 2));
+          return;
+        }
 
         console.log(chalk.green(`initialized ${root}`));
         if (result.created.length > 0) {

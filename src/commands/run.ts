@@ -4,12 +4,9 @@ import { executeRun, prepareRun } from "../lib/executor.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
-import type { AgentCli, ItemKind, RunMode } from "../lib/types.js";
+import type { AgentCli, ApprovalPolicy, ItemKind, RunMode, SandboxMode } from "../lib/types.js";
 import { printError } from "../lib/cli-output.js";
-
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
+import { collect } from "../lib/cli-utils.js";
 
 function pickTarget(opts: { issue?: string; pr?: string }): { kind?: ItemKind; number?: number } {
   if (opts.issue && opts.pr) {
@@ -42,7 +39,9 @@ export function registerRun(program: Command): void {
     .option("--non-interactive", "Alias for --mode non-interactive")
     .option("--cli <cli>", "claude|codex")
     .option("--model <model>", "Model override")
-    .option("--permission-mode <mode>", "Permission mode override")
+    .option("--permission-mode <mode>", "Permission mode override (claude: permission-mode, codex: approval-policy)")
+    .option("--sandbox <mode>", "Sandbox mode for codex (read-only|workspace-write|danger-full-access)")
+    .option("--approval-policy <policy>", "Approval policy for codex (untrusted|on-failure|on-request|never)")
     .option("--allowed-tool <tool>", "Allowed tool (repeatable)", collect, [])
     .option("--var <key=value>", "Template variable override", collect, [])
     .option("--print-prompt", "Print rendered prompt before execution")
@@ -52,7 +51,7 @@ export function registerRun(program: Command): void {
       try {
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
-        const vars = parseKeyValuePairs(opts.var ?? []);
+        const vars = parseKeyValuePairs(opts.var ?? [], false);
         const target = pickTarget(opts);
 
         let mode: RunMode | undefined = opts.mode;
@@ -91,6 +90,28 @@ export function registerRun(program: Command): void {
             return;
           }
 
+          // Print prompt before execution so it's useful for debugging.
+          if (opts.printPrompt) {
+            const prepared = await prepareRun({
+              collection,
+              repoRoot,
+              commandId,
+              kind: target.kind,
+              number: target.number,
+              repo: opts.repo,
+              vars,
+              ensureSidecar: true,
+            });
+
+            if (opts.format === "json") {
+              console.log(JSON.stringify({ prompt: prepared.renderedPrompt }, null, 2));
+            } else {
+              console.log(chalk.bold("Rendered prompt"));
+              console.log(prepared.renderedPrompt);
+              console.log();
+            }
+          }
+
           const result = await executeRun({
             collection,
             repoRoot,
@@ -105,16 +126,9 @@ export function registerRun(program: Command): void {
             model: opts.model,
             permissionMode: opts.permissionMode,
             allowedTools,
+            sandboxMode: opts.sandbox as SandboxMode | undefined,
+            approvalPolicy: opts.approvalPolicy as ApprovalPolicy | undefined,
           });
-
-          if (opts.printPrompt) {
-            if (opts.format === "json") {
-              console.log(JSON.stringify({ prompt: result.prompt }, null, 2));
-            } else {
-              console.log(chalk.bold("Rendered prompt"));
-              console.log(result.prompt);
-            }
-          }
 
           if (opts.format === "json") {
             console.log(JSON.stringify({

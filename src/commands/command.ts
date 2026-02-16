@@ -11,10 +11,7 @@ import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { writeFileForce } from "../lib/fs.js";
 import { printError } from "../lib/cli-output.js";
-
-function collect(value: string, previous: string[]): string[] {
-  return previous.concat([value]);
-}
+import { collect } from "../lib/cli-utils.js";
 
 function defaultName(id: string): string {
   return id
@@ -98,6 +95,7 @@ export function registerCommandCommands(program: Command): void {
     .command("new <id>")
     .description("Create a new command template")
     .option("--repo-root <path>", "Repository root")
+    .option("--format <format>", "text|json", "text")
     .option("--name <name>", "Display name")
     .option("--scope <scope>", "issue|pr|general", "general")
     .option("--description <description>", "Short description")
@@ -157,6 +155,14 @@ export function registerCommandCommands(program: Command): void {
         }
 
         await writeFileForce(fullPath, content);
+        if (opts.format === "json") {
+          console.log(JSON.stringify({
+            status: "created",
+            id,
+            path: relPath,
+          }, null, 2));
+          return;
+        }
         console.log(chalk.green(`created ${relPath}`));
       } catch (error) {
         printError(error instanceof Error ? error.message : String(error));
@@ -220,7 +226,7 @@ export function registerCommandCommands(program: Command): void {
           throw new Error("Use only one of --issue or --pr.");
         }
 
-        const vars = parseKeyValuePairs(opts.var ?? []);
+        const vars = parseKeyValuePairs(opts.var ?? [], false);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
 
