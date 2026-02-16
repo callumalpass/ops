@@ -26,7 +26,14 @@ export function parseValue(raw: string): unknown {
   return raw;
 }
 
-export function parseKeyValuePairs(pairs: string[]): Record<string, unknown> {
+/**
+ * Parse an array of "key=value" strings into a record.
+ * When {@link coerce} is true (default), values are auto-coerced via
+ * {@link parseValue} (numbers, booleans, JSON).  When false, values are
+ * kept as literal strings — use this for template variables where coercion
+ * is surprising (e.g. `--var summary=123` should stay `"123"`).
+ */
+export function parseKeyValuePairs(pairs: string[], coerce = true): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   for (const pair of pairs) {
     const idx = pair.indexOf("=");
@@ -38,7 +45,7 @@ export function parseKeyValuePairs(pairs: string[]): Record<string, unknown> {
     if (!key) {
       throw new Error(`Invalid key in pair: ${pair}`);
     }
-    result[key] = parseValue(value);
+    result[key] = coerce ? parseValue(value) : value;
   }
   return result;
 }

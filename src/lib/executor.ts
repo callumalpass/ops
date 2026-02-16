@@ -3,7 +3,7 @@ import { runAgent } from "./agents.js";
 import { buildContext } from "./context-builder.js";
 import { getCommandById } from "./ops-data.js";
 import { renderTemplate } from "./template.js";
-import type { AgentCli, ItemKind, RunMode } from "./types.js";
+import type { AgentCli, ApprovalPolicy, ItemKind, RunMode, SandboxMode } from "./types.js";
 
 export interface PrepareRunInput {
   collection: Collection;
@@ -52,6 +52,8 @@ export interface ExecuteRunInput extends PrepareRunInput {
   model?: string;
   permissionMode?: string;
   allowedTools?: string[];
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
 }
 
 export async function executeRun(input: ExecuteRunInput): Promise<{
@@ -79,6 +81,8 @@ export async function executeRun(input: ExecuteRunInput): Promise<{
     model: input.model ?? fm.model,
     permissionMode: input.permissionMode ?? fm.permission_mode,
     allowedTools: input.allowedTools ?? fm.allowed_tools,
+    sandboxMode: input.sandboxMode ?? fm.sandbox_mode,
+    approvalPolicy: input.approvalPolicy ?? fm.approval_policy,
   });
 
   return {

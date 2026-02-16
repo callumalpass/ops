@@ -56,12 +56,18 @@ export async function buildContext(input: BuildContextInput): Promise<BuildConte
     const labels = item.labels.map((x) => x.name);
     const assignees = item.assignees.map((x) => x.login);
 
+    // Fence body to mitigate prompt injection from user-authored content.
+    const fencedBody = item.body
+      ? `<github-${item.kind}-body>\n${item.body}\n</github-${item.kind}-body>`
+      : "";
+
     Object.assign(context, {
       kind: item.kind,
       number: item.number,
       repo: item.repo,
       title: item.title,
-      body: item.body,
+      body: fencedBody,
+      body_raw: item.body,
       author: item.author,
       state: item.state,
       url: item.url,
@@ -74,8 +80,24 @@ export async function buildContext(input: BuildContextInput): Promise<BuildConte
       base_ref: item.baseRefName,
     });
 
+    // Only include GitHub-specific fields, not repo_root/ops_root.
     context.github = {
-      ...context,
+      kind: item.kind,
+      number: item.number,
+      repo: item.repo,
+      title: item.title,
+      body: fencedBody,
+      body_raw: item.body,
+      author: item.author,
+      state: item.state,
+      url: item.url,
+      labels,
+      labels_csv: labels.join(","),
+      assignees,
+      assignees_csv: assignees.join(","),
+      item_ref: itemRef(item),
+      head_ref: item.headRefName,
+      base_ref: item.baseRefName,
     };
   }
 
@@ -84,6 +106,7 @@ export async function buildContext(input: BuildContextInput): Promise<BuildConte
     context.sidecar_path = sidecar.path;
     context.ops_item_path = sidecar.path;
     context.ops_item_abs_path = path.join(input.repoRoot, ".ops", sidecar.path);
+    context.sidecar_body = sidecar.body;
     for (const [k, v] of Object.entries(sidecar.frontmatter)) {
       if (!(k in context)) {
         context[k] = v;

@@ -49,6 +49,12 @@ fields:
     type: list
     items:
       type: string
+  sandbox_mode:
+    type: enum
+    values: [read-only, workspace-write, danger-full-access]
+  approval_policy:
+    type: enum
+    values: [untrusted, on-failure, on-request, never]
 ---
 `;
 
@@ -89,6 +95,9 @@ fields:
   priority:
     type: enum
     values: [low, medium, high, critical]
+  difficulty:
+    type: enum
+    values: [trivial, easy, medium, hard, complex]
   risk:
     type: enum
     values: [low, medium, high]
@@ -173,6 +182,7 @@ Update the sidecar file for this item:
 In that file, set/update:
 - local_status
 - priority (low|medium|high|critical)
+- difficulty (trivial|easy|medium|hard|complex)
 - risk (low|medium|high)
 - summary
 - notes
@@ -181,7 +191,7 @@ In that file, set/update:
 - sync_state (set to "clean" unless there is a conflict)
 
 You can update these fields by editing the markdown sidecar directly or using:
-- ops item set --issue {{number}} --field local_status=... --field priority=... --field risk=...
+- ops item set --issue {{number}} --field local_status=... --field priority=... --field difficulty=... --field risk=...
 `;
 
 const REVIEW_PR_COMMAND = `---
@@ -225,6 +235,55 @@ Use notes to capture:
 2. Risks and regressions
 3. Missing tests
 4. Merge recommendation
+`;
+
+const ADDRESS_ISSUE_COMMAND = `---
+type: command
+id: address-issue
+name: Address Issue
+scope: issue
+description: Implement a solution for an issue using existing triage analysis
+placeholders: [item_ref, title, author, body, priority, difficulty, risk, summary, notes, sidecar_body, sidecar_path, ops_item_abs_path]
+cli_type: claude
+active: true
+default_mode: interactive
+---
+Address issue {{item_ref}}.
+
+Title: {{title}}
+Author: {{author}}
+Priority: {{priority|not set}}
+Difficulty: {{difficulty|not set}}
+Risk: {{risk|not set}}
+
+Triage summary:
+{{summary|No summary yet.}}
+
+Triage notes:
+{{notes|No notes yet.}}
+
+Sidecar markdown body context:
+{{sidecar_body|No additional sidecar body context.}}
+
+Issue body:
+{{body|No issue body provided.}}
+
+Before coding:
+1. Read the sidecar file at {{sidecar_path|items/issue-<number>.md}} ({{ops_item_abs_path|<repo>/.ops/items/...}}).
+2. Confirm or refine the approach based on current code state.
+3. Implement the fix with appropriate tests.
+
+After coding, update the sidecar with current status and outcomes.
+You can update via direct markdown edit or with:
+- ops item set --issue {{number}} --field local_status=... --field summary=... --field difficulty=...
+
+Set/update:
+- local_status (in_progress, blocked, done, etc.)
+- summary (what was done)
+- notes (decisions, caveats, follow-ups)
+- command_id (set to "address-issue")
+- last_analyzed_at (ISO timestamp)
+- sync_state (clean unless conflict)
 `;
 
 const HANDOFF_COMMAND = `---
@@ -271,6 +330,7 @@ ops doctor
 ops command list
 ops item ensure --issue 123
 ops run triage-issue --issue 123
+ops run address-issue --issue 123
 \`\`\`
 
 Useful variants:
@@ -278,9 +338,10 @@ Useful variants:
 \`\`\`bash
 ops run review-pr --pr 456 --interactive
 ops run triage-issue --issue 123 --non-interactive
+ops run address-issue --issue 123 --interactive
 ops command render triage-issue --issue 123
 ops item set --issue 123 --field local_status=in_progress
-ops item set --issue 123 --field priority=high --field risk=medium
+ops item set --issue 123 --field priority=high --field difficulty=medium --field risk=medium
 \`\`\`
 
 ## How commands work
@@ -300,13 +361,14 @@ When working on issues/PRs through this repo:
    - \`ops item ensure --issue <n>\` or \`ops item ensure --pr <n>\`
 2. Run an appropriate command template:
    - \`ops run triage-issue --issue <n>\`
+   - \`ops run address-issue --issue <n>\`
    - \`ops run review-pr --pr <n>\`
 3. If the command asks for sidecar updates, use either approach:
    - edit \`.ops/items/*.md\` directly
    - or use \`ops item set\` for structured frontmatter updates
 4. Example structured updates:
-   - \`ops item set --issue <n> --field local_status=in_progress --field priority=high\`
-5. Keep frontmatter concise and structured (\`local_status\`, \`priority\`, \`risk\`, \`summary\`, \`notes\`).
+   - \`ops item set --issue <n> --field local_status=in_progress --field priority=high --field difficulty=medium\`
+5. Keep frontmatter concise and structured (\`local_status\`, \`priority\`, \`difficulty\`, \`risk\`, \`summary\`, \`notes\`).
 6. Prefer writing detailed analysis in the markdown body of \`.ops/items/*.md\`.
    Use frontmatter for queryable status/metadata, body for richer reasoning and handover context.
 7. Use handoffs for continuity:
@@ -324,6 +386,7 @@ export async function scaffoldOps(opsRoot: string, force: boolean): Promise<{ cr
   const skipped: string[] = [];
 
   const files: Array<{ path: string; content: string }> = [
+    { path: ".gitignore", content: ".lock\n" },
     { path: "mdbase.yaml", content: MDBASE_YAML },
     { path: "README.md", content: README },
     { path: "_types/command.md", content: COMMAND_TYPE },
@@ -331,6 +394,7 @@ export async function scaffoldOps(opsRoot: string, force: boolean): Promise<{ cr
     { path: "_types/handoff.md", content: HANDOFF_TYPE },
     { path: "commands/triage-issue.md", content: TRIAGE_ISSUE_COMMAND },
     { path: "commands/review-pr.md", content: REVIEW_PR_COMMAND },
+    { path: "commands/address-issue.md", content: ADDRESS_ISSUE_COMMAND },
     { path: "commands/handoff.md", content: HANDOFF_COMMAND },
   ];
 

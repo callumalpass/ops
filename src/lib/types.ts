@@ -2,6 +2,9 @@ export type AgentCli = "claude" | "codex";
 export type RunMode = "interactive" | "non-interactive";
 export type ItemKind = "issue" | "pr";
 
+export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
+export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
+
 export interface CommandRecord {
   path: string;
   body: string;
@@ -17,6 +20,8 @@ export interface CommandRecord {
     model?: string;
     permission_mode?: string;
     allowed_tools?: string[];
+    sandbox_mode?: SandboxMode;
+    approval_policy?: ApprovalPolicy;
   };
 }
 
@@ -58,6 +63,8 @@ export interface AgentRunInput {
   model?: string;
   permissionMode?: string;
   allowedTools?: string[];
+  sandboxMode?: SandboxMode;
+  approvalPolicy?: ApprovalPolicy;
 }
 
 export interface AgentRunResult {
