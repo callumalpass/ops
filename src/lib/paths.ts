@@ -11,6 +11,9 @@ export function findRepoRoot(startDir = process.cwd()): string {
     }
     const parent = path.dirname(dir);
     if (parent === dir) {
+      console.error(
+        `warn: no .git directory found above ${startDir}, falling back to cwd as repo root`,
+      );
       return path.resolve(startDir);
     }
     dir = parent;

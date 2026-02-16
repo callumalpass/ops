@@ -40,7 +40,6 @@ export async function listCommands(collection: Collection): Promise<CommandRecor
     types: ["command"],
     order_by: [{ field: "id", direction: "asc" }],
     include_body: true,
-    limit: 1000,
   });
   if (result.error) {
     throw new Error(`Failed to list commands: ${result.error.message}`);
