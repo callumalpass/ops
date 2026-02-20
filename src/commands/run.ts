@@ -5,27 +5,10 @@ import { loadOpsConfig } from "../lib/config.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
-import type { AgentCli, ApprovalPolicy, ItemKind, ProviderId, RunMode, SandboxMode } from "../lib/types.js";
+import { parseTargetOptions } from "../lib/targets.js";
+import type { AgentCli, ApprovalPolicy, ProviderId, RunMode, SandboxMode } from "../lib/types.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
-
-function pickTarget(opts: { issue?: string; pr?: string }): { kind?: ItemKind; number?: number } {
-  if (opts.issue && opts.pr) {
-    throw new Error("Use only one of --issue or --pr.");
-  }
-  if (!opts.issue && !opts.pr) {
-    return {};
-  }
-  const raw = opts.issue ?? opts.pr;
-  const number = Number.parseInt(String(raw), 10);
-  if (Number.isNaN(number) || number <= 0) {
-    throw new Error(`Invalid item number: ${raw}`);
-  }
-  return {
-    kind: opts.issue ? "issue" : "pr",
-    number,
-  };
-}
 
 export function registerRun(program: Command): void {
   program
@@ -34,6 +17,7 @@ export function registerRun(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--repo <scope>", "Provider scope override (for example owner/repo)")
     .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--mode <mode>", "interactive|non-interactive")
@@ -55,7 +39,7 @@ export function registerRun(program: Command): void {
         const ops = resolveOpsRoot(repoRoot);
         const config = await loadOpsConfig(repoRoot);
         const vars = parseKeyValuePairs(opts.var ?? [], false);
-        const target = pickTarget(opts);
+        const target = parseTargetOptions(opts, false);
 
         let mode: RunMode | undefined = opts.mode;
         if (opts.interactive) mode = "interactive";
@@ -74,8 +58,7 @@ export function registerRun(program: Command): void {
               collection,
               repoRoot,
               commandId,
-              kind: target.kind,
-              number: target.number,
+              target,
               repo,
               provider,
               vars,
@@ -84,7 +67,7 @@ export function registerRun(program: Command): void {
 
             if (prepared.missingRequired.length > 0) {
               throw new Error(
-                `Missing template variables: ${prepared.missingRequired.join(", ")}. Provide with --var or select an issue/pr context.`,
+                `Missing template variables: ${prepared.missingRequired.join(", ")}. Provide with --var or select an --issue/--pr/--task context.`,
               );
             }
 
@@ -102,8 +85,7 @@ export function registerRun(program: Command): void {
               collection,
               repoRoot,
               commandId,
-              kind: target.kind,
-              number: target.number,
+              target,
               repo,
               provider,
               vars,
@@ -123,8 +105,7 @@ export function registerRun(program: Command): void {
             collection,
             repoRoot,
             commandId,
-            kind: target.kind,
-            number: target.number,
+            target,
             repo,
             provider,
             vars,

@@ -1,11 +1,13 @@
 import { Command } from "commander";
 import chalk from "chalk";
 import { loadOpsConfig } from "../lib/config.js";
+import { fetchLocalTaskItem } from "../lib/local-tasks.js";
 import { fetchProviderItem } from "../lib/providers/index.js";
 import { readItem, updateItemFields, upsertItemFromProvider } from "../lib/ops-data.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
+import { parseTargetOptions } from "../lib/targets.js";
 import { printError } from "../lib/cli-output.js";
 import type { ProviderId } from "../lib/types.js";
 
@@ -19,23 +21,8 @@ function makeWhere(opts: { kind?: string; status?: string; priority?: string; di
   return clauses.join(" && ");
 }
 
-function resolveTarget(opts: { issue?: string; pr?: string }): { kind: "issue" | "pr"; number: number } {
-  if (opts.issue && opts.pr) {
-    throw new Error("Use only one of --issue or --pr.");
-  }
-  if (!opts.issue && !opts.pr) {
-    throw new Error("Provide --issue or --pr.");
-  }
-  const raw = opts.issue ?? opts.pr!;
-  const number = Number.parseInt(raw, 10);
-  if (Number.isNaN(number) || number <= 0) {
-    throw new Error(`Invalid item number: ${raw}`);
-  }
-  return { kind: opts.issue ? "issue" : "pr", number };
-}
-
 export function registerItemCommands(program: Command): void {
-  const item = program.command("item").description("Manage issue/pr sidecar records");
+  const item = program.command("item").description("Manage sidecar records for issues, PRs, and tasks");
 
   item
     .command("ensure")
@@ -44,30 +31,34 @@ export function registerItemCommands(program: Command): void {
     .option("--format <format>", "text|json", "text")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--repo <scope>", "Provider scope override (for example owner/repo)")
     .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .action(async (opts) => {
       try {
-        const target = resolveTarget(opts);
+        const target = parseTargetOptions(opts, true);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const config = await loadOpsConfig(repoRoot);
         const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const remoteItem = await fetchProviderItem(
-            target.kind,
-            target.number,
-            repoRoot,
-            opts.repo ?? config.default_repo,
-            provider,
-          );
+          const remoteItem = target.kind === "task"
+            ? await fetchLocalTaskItem(collection, target.key)
+            : await fetchProviderItem(
+              target.kind,
+              target.number!,
+              repoRoot,
+              opts.repo ?? config.default_repo,
+              provider,
+            );
           const path = await upsertItemFromProvider(collection, remoteItem);
           if (opts.format === "json") {
             console.log(JSON.stringify({
               status: "updated",
               path,
               kind: target.kind,
+              key: target.key,
               number: target.number,
               repo: remoteItem.repo,
             }, null, 2));
@@ -85,7 +76,7 @@ export function registerItemCommands(program: Command): void {
     .command("list")
     .description("List sidecar items")
     .option("--repo-root <path>", "Repository root")
-    .option("--kind <kind>", "issue|pr")
+    .option("--kind <kind>", "issue|pr|task")
     .option("--status <status>", "Filter by local_status")
     .option("--priority <priority>", "Filter by priority")
     .option("--difficulty <difficulty>", "Filter by difficulty")
@@ -106,7 +97,7 @@ export function registerItemCommands(program: Command): void {
             where,
             order_by: [
               { field: "kind", direction: "asc" },
-              { field: "number", direction: "asc" },
+              { field: "key", direction: "asc" },
             ],
           });
 
@@ -128,12 +119,12 @@ export function registerItemCommands(program: Command): void {
           for (const row of rows) {
             const fm = row.frontmatter as Record<string, unknown>;
             const kind = String(fm.kind ?? "?");
-            const number = String(fm.number ?? "?");
+            const key = String(fm.key ?? fm.number ?? "?");
             const state = String(fm.local_status ?? "new");
             const title = String(fm.remote_title ?? "");
             const priority = fm.priority ? ` ${chalk.yellow(`[${String(fm.priority)}]`)}` : "";
             const difficulty = fm.difficulty ? ` ${chalk.magenta(`{${String(fm.difficulty)}}`)}` : "";
-            console.log(`${chalk.bold(kind)} #${number} ${chalk.dim(state)}${priority}${difficulty}`);
+            console.log(`${chalk.bold(kind)} ${chalk.dim(key)} ${chalk.dim(state)}${priority}${difficulty}`);
             if (title) console.log(`  ${title}`);
           }
         });
@@ -149,15 +140,16 @@ export function registerItemCommands(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--format <format>", "text|json", "text")
     .action(async (opts) => {
       try {
-        const target = resolveTarget(opts);
+        const target = parseTargetOptions(opts, true);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const item = await readItem(collection, target.kind, target.number);
+          const item = await readItem(collection, target);
           if (opts.format === "json") {
             console.log(JSON.stringify(item, null, 2));
             return;
@@ -185,10 +177,11 @@ export function registerItemCommands(program: Command): void {
     .option("--format <format>", "text|json", "text")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--field <key=value>", "Field assignment", (value: string, prev: string[]) => prev.concat([value]), [])
     .action(async (opts) => {
       try {
-        const target = resolveTarget(opts);
+        const target = parseTargetOptions(opts, true);
         if (!opts.field || opts.field.length === 0) {
           throw new Error("Provide at least one --field key=value.");
         }
@@ -198,12 +191,13 @@ export function registerItemCommands(program: Command): void {
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const path = await updateItemFields(collection, target.kind, target.number, fields);
+          const path = await updateItemFields(collection, target, fields);
           if (opts.format === "json") {
             console.log(JSON.stringify({
               status: "updated",
               path,
               kind: target.kind,
+              key: target.key,
               number: target.number,
               fields,
             }, null, 2));

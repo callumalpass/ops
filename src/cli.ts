@@ -8,6 +8,7 @@ import { registerItemCommands } from "./commands/item.js";
 import { registerRun } from "./commands/run.js";
 import { registerTriage } from "./commands/triage.js";
 import { registerIssue } from "./commands/issue.js";
+import { registerTask } from "./commands/task.js";
 import { registerHandoff } from "./commands/handoff.js";
 import { registerDoctor } from "./commands/doctor.js";
 
@@ -26,6 +27,7 @@ registerItemCommands(program);
 registerRun(program);
 registerTriage(program);
 registerIssue(program);
+registerTask(program);
 registerHandoff(program);
 registerDoctor(program);
 

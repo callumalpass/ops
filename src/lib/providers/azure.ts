@@ -185,10 +185,12 @@ export async function fetchAzureItem(input: FetchItemInput): Promise<RemoteItem>
 }
 
 function itemRef(item: RemoteItem): string {
+  const repo = item.repo ?? "unknown/repo";
+  const number = item.number ?? item.key ?? "?";
   if (item.kind === "issue") {
-    return `${item.repo}#${item.number}`;
+    return `${repo}#${number}`;
   }
-  return `${item.repo}#PR${item.number}`;
+  return `${repo}#PR${number}`;
 }
 
 export const azureProvider: ProviderAdapter = {

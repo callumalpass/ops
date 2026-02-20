@@ -1,5 +1,7 @@
+import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import type { ItemKind } from "./types.js";
 
 export const OPS_DIR = ".ops";
 
@@ -32,8 +34,23 @@ export function requireOpsPath(repoRoot: string): string {
   return p;
 }
 
-export function itemPath(kind: "issue" | "pr", number: number): string {
-  return `items/${kind}-${number}.md`;
+function toSlug(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 56);
+}
+
+export function itemPath(kind: ItemKind, key: string): string {
+  const trimmed = key.trim();
+  if (/^\d+$/.test(trimmed)) {
+    return `items/${kind}-${trimmed}.md`;
+  }
+
+  const slug = toSlug(trimmed) || "item";
+  const hash = createHash("sha1").update(trimmed).digest("hex").slice(0, 8);
+  return `items/${kind}-${slug}-${hash}.md`;
 }
 
 export function handoffPath(id: string): string {

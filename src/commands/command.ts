@@ -13,6 +13,7 @@ import { withCollection } from "../lib/store.js";
 import { writeFileForce } from "../lib/fs.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
+import { parseTargetOptions } from "../lib/targets.js";
 import type { ProviderId } from "../lib/types.js";
 
 function defaultName(id: string): string {
@@ -99,7 +100,7 @@ export function registerCommandCommands(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--format <format>", "text|json", "text")
     .option("--name <name>", "Display name")
-    .option("--scope <scope>", "issue|pr|general", "general")
+    .option("--scope <scope>", "issue|pr|task|general", "general")
     .option("--description <description>", "Short description")
     .option("--cli <cli>", "claude|codex", "claude")
     .option("--mode <mode>", "interactive|non-interactive", "interactive")
@@ -222,6 +223,7 @@ export function registerCommandCommands(program: Command): void {
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--repo <scope>", "Provider scope override (for example owner/repo)")
     .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--var <key=value>", "Template variable override", collect, [])
@@ -229,26 +231,19 @@ export function registerCommandCommands(program: Command): void {
     .option("--format <format>", "text|json", "text")
     .action(async (id: string, opts) => {
       try {
-        if (opts.issue && opts.pr) {
-          throw new Error("Use only one of --issue or --pr.");
-        }
-
         const vars = parseKeyValuePairs(opts.var ?? [], false);
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const config = await loadOpsConfig(repoRoot);
         const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
+        const target = parseTargetOptions(opts, false);
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const kind = opts.issue ? "issue" : opts.pr ? "pr" : undefined;
-          const number = opts.issue ? Number.parseInt(opts.issue, 10) : opts.pr ? Number.parseInt(opts.pr, 10) : undefined;
-
           const prepared = await prepareRun({
             collection,
             repoRoot,
             commandId: id,
-            kind,
-            number,
+            target,
             repo: opts.repo ?? config.default_repo,
             provider,
             vars,

@@ -3,11 +3,16 @@ import { itemPath, handoffPath, commandPath } from "../lib/paths.js";
 
 describe("itemPath", () => {
   it("generates issue path", () => {
-    expect(itemPath("issue", 123)).toBe("items/issue-123.md");
+    expect(itemPath("issue", "123")).toBe("items/issue-123.md");
   });
 
   it("generates pr path", () => {
-    expect(itemPath("pr", 456)).toBe("items/pr-456.md");
+    expect(itemPath("pr", "456")).toBe("items/pr-456.md");
+  });
+
+  it("generates deterministic task path", () => {
+    expect(itemPath("task", "tasks/Ship release train.md")).toMatch(/^items\/task-/);
+    expect(itemPath("task", "tasks/Ship release train.md")).toMatch(/\.md$/);
   });
 });
 

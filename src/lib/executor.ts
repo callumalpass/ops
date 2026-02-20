@@ -3,14 +3,14 @@ import { runAgent } from "./agents.js";
 import { buildContext } from "./context-builder.js";
 import { getCommandById } from "./ops-data.js";
 import { renderTemplate } from "./template.js";
-import type { AgentCli, ApprovalPolicy, ItemKind, ProviderId, RunMode, SandboxMode } from "./types.js";
+import type { ItemTarget } from "./targets.js";
+import type { AgentCli, ApprovalPolicy, ProviderId, RunMode, SandboxMode } from "./types.js";
 
 export interface PrepareRunInput {
   collection: Collection;
   repoRoot: string;
   commandId: string;
-  kind?: ItemKind;
-  number?: number;
+  target?: ItemTarget;
   repo?: string;
   provider?: ProviderId;
   vars?: Record<string, unknown>;
@@ -22,7 +22,7 @@ export interface PreparedRun {
   context: Record<string, unknown>;
   renderedPrompt: string;
   missingRequired: string[];
-  item?: { kind: ItemKind; number: number };
+  item?: ItemTarget;
 }
 
 export async function prepareRun(input: PrepareRunInput): Promise<PreparedRun> {
@@ -30,8 +30,7 @@ export async function prepareRun(input: PrepareRunInput): Promise<PreparedRun> {
   const built = await buildContext({
     collection: input.collection,
     repoRoot: input.repoRoot,
-    kind: input.kind,
-    number: input.number,
+    target: input.target,
     repo: input.repo,
     provider: input.provider,
     explicitVars: input.vars,
@@ -44,7 +43,7 @@ export async function prepareRun(input: PrepareRunInput): Promise<PreparedRun> {
     context: built.context,
     renderedPrompt: rendered.text,
     missingRequired: rendered.missingRequired,
-    item: input.kind && typeof input.number === "number" ? { kind: input.kind, number: input.number } : undefined,
+    item: input.target,
   };
 }
 
@@ -77,7 +76,7 @@ export async function executeRun(input: ExecuteRunInput): Promise<{
   const prepared = await prepareRun(input);
   if (prepared.missingRequired.length > 0) {
     throw new Error(
-      `Missing template variables: ${prepared.missingRequired.join(", ")}. Provide with --var or select an issue/pr context.`,
+      `Missing template variables: ${prepared.missingRequired.join(", ")}. Provide with --var or select an --issue/--pr/--task context.`,
     );
   }
 

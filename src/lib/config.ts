@@ -17,6 +17,8 @@ export interface OpsConfig {
     triage_issue: string;
     address_issue: string;
     review_pr: string;
+    triage_task: string;
+    address_task: string;
   };
 }
 
@@ -25,6 +27,8 @@ const DEFAULT_CONFIG: OpsConfig = {
     triage_issue: "triage-issue",
     address_issue: "address-issue",
     review_pr: "review-pr",
+    triage_task: "triage-task",
+    address_task: "address-task",
   },
 };
 
@@ -125,6 +129,12 @@ export async function loadOpsConfig(repoRoot: string): Promise<OpsConfig> {
     }
     if (commandMap.review_pr !== undefined) {
       resolved.commands.review_pr = asString(commandMap.review_pr, "commands.review_pr");
+    }
+    if (commandMap.triage_task !== undefined) {
+      resolved.commands.triage_task = asString(commandMap.triage_task, "commands.triage_task");
+    }
+    if (commandMap.address_task !== undefined) {
+      resolved.commands.address_task = asString(commandMap.address_task, "commands.address_task");
     }
   }
 

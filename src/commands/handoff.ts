@@ -5,6 +5,7 @@ import { handoffPath } from "../lib/paths.js";
 import { readItem } from "../lib/ops-data.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
+import { parseTargetOptions } from "../lib/targets.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
 
@@ -55,6 +56,7 @@ export function registerHandoff(program: Command): void {
     .option("--id <id>", "Handoff id")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .requiredOption("--for-agent <name>", "Target agent/person")
     .option("--next-step <text>", "Next step (repeatable)", collect, [])
     .option("--blocker <text>", "Blocker (repeatable)", collect, [])
@@ -62,30 +64,20 @@ export function registerHandoff(program: Command): void {
     .option("--body <text>", "Body markdown")
     .action(async (opts) => {
       try {
-        if (opts.issue && opts.pr) {
-          throw new Error("Use only one of --issue or --pr.");
-        }
-        if (!opts.issue && !opts.pr) {
-          throw new Error("Provide --issue or --pr.");
-        }
-
-        const kind = opts.issue ? "issue" : "pr";
-        const number = Number.parseInt(opts.issue ?? opts.pr, 10);
-        if (Number.isNaN(number) || number <= 0) {
-          throw new Error("Invalid item number.");
-        }
+        const target = parseTargetOptions(opts, true);
 
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
 
         await withCollection(ops, async (collection) => {
-          const item = await readItem(collection, kind, number);
+          const item = await readItem(collection, target);
           const itemId = String(item.frontmatter.id ?? "");
           if (!itemId) {
             throw new Error(`Item sidecar missing id: ${item.path}`);
           }
 
-          const id = opts.id || makeId(`${kind}-${number}`);
+          const idPrefix = target.kind === "task" ? "task" : `${target.kind}-${target.key}`;
+          const id = opts.id || makeId(idPrefix);
           const createResult = await collection.create({
             type: "handoff",
             path: handoffPath(id),

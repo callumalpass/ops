@@ -1,14 +1,14 @@
 import { Command } from "commander";
 import { executeRun } from "../lib/executor.js";
 import { loadOpsConfig } from "../lib/config.js";
-import { fetchProviderItem } from "../lib/providers/index.js";
+import { fetchLocalTaskItem } from "../lib/local-tasks.js";
 import { readItem, upsertItemFromProvider } from "../lib/ops-data.js";
 import { parseKeyValuePairs } from "../lib/parse.js";
 import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
-import type { AgentCli, ApprovalPolicy, ProviderId, RunMode, SandboxMode } from "../lib/types.js";
+import type { AgentCli, ApprovalPolicy, RunMode, SandboxMode } from "../lib/types.js";
 
 function hasNonEmptyString(value: unknown): boolean {
   return typeof value === "string" && value.trim().length > 0;
@@ -23,16 +23,14 @@ function hasTriageAnalysis(frontmatter: Record<string, unknown>): boolean {
   );
 }
 
-export function registerIssue(program: Command): void {
-  const issue = program.command("issue").description("Issue-focused high-level workflows");
+export function registerTask(program: Command): void {
+  const task = program.command("task").description("Task-focused high-level workflows");
 
-  issue
+  task
     .command("address")
-    .description("Address an issue, auto-running triage first when sidecar analysis is missing")
-    .requiredOption("--issue <number>", "Issue number")
+    .description("Address a local task, auto-running triage when sidecar analysis is missing")
+    .requiredOption("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--repo-root <path>", "Repository root")
-    .option("--repo <scope>", "Provider scope override (for example owner/repo)")
-    .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--address-command <id>", "Command id for address flow")
     .option("--triage-command <id>", "Command id for triage flow")
     .option("--skip-triage", "Skip automatic triage even if analysis fields are missing")
@@ -51,18 +49,11 @@ export function registerIssue(program: Command): void {
     .option("--format <format>", "text|json", "text")
     .action(async (opts) => {
       try {
-        const number = Number.parseInt(String(opts.issue), 10);
-        if (Number.isNaN(number) || number <= 0) {
-          throw new Error(`Invalid issue number: ${opts.issue}`);
-        }
-
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const ops = resolveOpsRoot(repoRoot);
         const config = await loadOpsConfig(repoRoot);
-        const repo = opts.repo ?? config.default_repo;
-        const provider = (opts.provider ?? config.default_provider ?? "github") as ProviderId;
-        const triageCommandId = opts.triageCommand ?? config.commands.triage_issue;
-        const addressCommandId = opts.addressCommand ?? config.commands.address_issue;
+        const triageCommandId = opts.triageCommand ?? config.commands.triage_task;
+        const addressCommandId = opts.addressCommand ?? config.commands.address_task;
 
         let mode: RunMode | undefined = opts.mode;
         if (opts.interactive) mode = "interactive";
@@ -76,24 +67,21 @@ export function registerIssue(program: Command): void {
           : undefined;
 
         await withCollection(ops, async (collection) => {
-          const remoteIssue = await fetchProviderItem("issue", number, repoRoot, repo, provider);
-          await upsertItemFromProvider(collection, remoteIssue);
+          const taskItem = await fetchLocalTaskItem(collection, opts.task);
+          await upsertItemFromProvider(collection, taskItem);
+          const target = { kind: "task" as const, key: taskItem.key! };
 
-          const target = { kind: "issue" as const, key: String(number), number };
           const sidecar = await readItem(collection, target);
           const triageMissing = !hasTriageAnalysis(sidecar.frontmatter);
           const shouldRunTriage = Boolean(opts.forceTriage) || (!opts.skipTriage && triageMissing);
 
           let triageResult: { exitCode: number; stdout: string; stderr: string; mode: RunMode } | undefined;
-
           if (shouldRunTriage) {
             triageResult = await executeRun({
               collection,
               repoRoot,
               commandId: triageCommandId,
               target,
-              repo,
-              provider,
               vars: {},
               ensureSidecar: true,
               mode: triageMode,
@@ -120,15 +108,6 @@ export function registerIssue(program: Command): void {
               }
               process.exit(triageResult.exitCode);
             }
-
-            if (triageResult.mode === "non-interactive" && opts.format !== "json") {
-              if (triageResult.stdout.trim()) {
-                process.stdout.write(triageResult.stdout.endsWith("\n") ? triageResult.stdout : `${triageResult.stdout}\n`);
-              }
-              if (triageResult.stderr.trim()) {
-                process.stderr.write(triageResult.stderr.endsWith("\n") ? triageResult.stderr : `${triageResult.stderr}\n`);
-              }
-            }
           }
 
           const addressResult = await executeRun({
@@ -136,8 +115,6 @@ export function registerIssue(program: Command): void {
             repoRoot,
             commandId: addressCommandId,
             target,
-            repo,
-            provider,
             vars,
             ensureSidecar: true,
             mode,
@@ -160,7 +137,7 @@ export function registerIssue(program: Command): void {
 
           if (opts.format === "json") {
             console.log(JSON.stringify({
-              issue: number,
+              task: target.key,
               triage_ran: shouldRunTriage,
               triage_command_id: triageCommandId,
               address_command_id: addressCommandId,
@@ -187,3 +164,4 @@ export function registerIssue(program: Command): void {
       }
     });
 }
+

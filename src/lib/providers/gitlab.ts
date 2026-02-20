@@ -90,10 +90,12 @@ export async function fetchGitLabItem(input: FetchItemInput): Promise<RemoteItem
 }
 
 function itemRef(item: RemoteItem): string {
+  const repo = item.repo ?? "unknown/repo";
+  const number = item.number ?? item.key ?? "?";
   if (item.kind === "issue") {
-    return `${item.repo}#${item.number}`;
+    return `${repo}#${number}`;
   }
-  return `${item.repo}!${item.number}`;
+  return `${repo}!${number}`;
 }
 
 export const gitlabProvider: ProviderAdapter = {

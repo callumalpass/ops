@@ -1,7 +1,7 @@
-import type { ItemKind, ProviderId, RemoteItem } from "../types.js";
+import type { ProviderId, RemoteItem, RemoteKind } from "../types.js";
 
 export interface FetchItemInput {
-  kind: ItemKind;
+  kind: RemoteKind;
   number: number;
   cwd: string;
   repo?: string;

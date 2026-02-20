@@ -1,6 +1,6 @@
 # ops
 
-`ops` is a markdown-native operations CLI for AI-assisted delivery workflows. It keeps local, typed sidecar state in `.ops/` and pulls live issue/PR data from your configured provider (GitHub, GitLab, Jira, Azure DevOps) at run time. The `.ops/` directory is designed to be committed alongside your code — operational decisions are versioned, diffable, and reviewable in PRs like any other source file.
+`ops` is a markdown-native operations CLI for AI-assisted delivery workflows. It keeps local, typed sidecar state in `.ops/` and supports both live remote work items (issues/PRs from GitHub, GitLab, Jira, Azure DevOps) and local task files. The `.ops/` directory is designed to be committed alongside your code — operational decisions are versioned, diffable, and reviewable in PRs like any other source file.
 
 ## Demo
 
@@ -8,7 +8,7 @@
 
 ## What it does
 
-`ops` maintains **sidecar files** — one per issue or PR — that hold local operational metadata (priority, difficulty, risk, status, notes) as typed markdown with YAML frontmatter. These sidecars act as shared memory across agent sessions: a triage run writes its assessment to the sidecar, and a later review or handoff run can read it back without re-deriving context.
+`ops` maintains **sidecar files** — one per work item (issue, PR, or local task) — that hold local operational metadata (priority, difficulty, risk, status, notes) as typed markdown with YAML frontmatter. These sidecars act as shared memory across agent sessions: a triage run writes its assessment to the sidecar, and a later review or handoff run can read it back without re-deriving context.
 
 **Command templates** (also markdown files) define reusable prompts with `{{variable}}` expansion. At run time, `ops` merges provider fields, sidecar fields, and explicit `--var` values into the template, then passes the rendered prompt to an agent CLI as a subprocess.
 
@@ -64,6 +64,11 @@ ops run address-issue --issue 123
 # First-class issue workflow (auto-triage if analysis is missing)
 ops issue address --issue 123
 
+# Local task workflows
+ops item ensure --task tasks/Ship release train.md
+ops run triage-task --task tasks/Ship release train.md
+ops task address --task tasks/Ship release train.md
+
 # Run non-interactively
 ops run review-pr --pr 456 --non-interactive
 ```
@@ -112,13 +117,17 @@ Environment variables:
   _types/
     command.md
     item_state.md
+    task.md
     handoff.md
   commands/
     address-issue.md
     triage-issue.md
+    address-task.md
+    triage-task.md
     review-pr.md
     handoff.md
   items/
+  tasks/
   handoffs/
 ```
 
@@ -139,7 +148,7 @@ ops command list
 ops command show <id>
 ops command new <id> [options] [--format text|json]
 ops command validate
-ops command render <id> [--issue N|--pr N] [--var k=v ...]
+ops command render <id> [--issue N|--pr N|--task REF] [--var k=v ...]
 ```
 
 ### Sidecar items
@@ -147,16 +156,19 @@ ops command render <id> [--issue N|--pr N] [--var k=v ...]
 ```bash
 ops item ensure --issue N [--repo owner/repo] [--format text|json]
 ops item ensure --pr N [--repo owner/repo] [--format text|json]
-ops item list [--kind issue|pr] [--status STATUS] [--priority PRIORITY] [--difficulty DIFFICULTY]
+ops item ensure --task <ref> [--format text|json]
+ops item list [--kind issue|pr|task] [--status STATUS] [--priority PRIORITY] [--difficulty DIFFICULTY]
 ops item show --issue N
 ops item show --pr N
+ops item show --task <ref>
 ops item set --issue N --field key=value [--field key=value] [--format text|json]
+ops item set --task <ref> --field key=value [--field key=value] [--format text|json]
 ```
 
 ### Run templates
 
 ```bash
-ops run <command-id> [--issue N|--pr N] [--interactive|--non-interactive]
+ops run <command-id> [--issue N|--pr N|--task REF] [--interactive|--non-interactive]
 ops run <command-id> --var key=value --var key=value
 ```
 
@@ -165,18 +177,21 @@ ops run <command-id> --var key=value --var key=value
 ```bash
 ops triage --issue N
 ops triage --pr N
+ops triage --task <ref>
 ```
 
 ### Issue shortcut
 
 ```bash
 ops issue address --issue N
+ops task address --task <ref>
 ```
 
 ### Handoffs
 
 ```bash
 ops handoff create --issue N --for-agent codex --next-step "..." [--format text|json]
+ops handoff create --task <ref> --for-agent codex --next-step "..." [--format text|json]
 ops handoff list
 ops handoff show <id>
 ops handoff close <id> [--format text|json]

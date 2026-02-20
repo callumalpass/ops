@@ -1,7 +1,9 @@
 export type AgentCli = "claude" | "codex";
 export type RunMode = "interactive" | "non-interactive";
-export type ItemKind = "issue" | "pr";
+export type ItemKind = "issue" | "pr" | "task";
 export type ProviderId = "github" | "gitlab" | "jira" | "azure";
+export type ItemProviderId = ProviderId | "local";
+export type RemoteKind = Exclude<ItemKind, "task">;
 
 export type SandboxMode = "read-only" | "workspace-write" | "danger-full-access";
 export type ApprovalPolicy = "untrusted" | "on-failure" | "on-request" | "never";
@@ -12,7 +14,7 @@ export interface CommandRecord {
   frontmatter: {
     id: string;
     name: string;
-    scope: "issue" | "pr" | "general";
+    scope: "issue" | "pr" | "task" | "general";
     description?: string;
     placeholders?: string[];
     cli_type?: AgentCli;
@@ -35,20 +37,22 @@ export interface RemoteUser {
 }
 
 export interface RemoteItem {
-  provider?: ProviderId;
+  provider?: ItemProviderId;
   kind: ItemKind;
-  repo: string;
-  number: number;
+  key?: string;
+  repo?: string;
+  number?: number;
   title: string;
   body: string;
-  author: string;
-  state: string;
-  url: string;
+  author?: string;
+  state?: string;
+  url?: string;
   labels: RemoteLabel[];
   assignees: RemoteUser[];
   updatedAt: string;
   headRefName?: string;
   baseRefName?: string;
+  sourcePath?: string;
 }
 
 // Backwards-compatible aliases while provider abstraction is phased in.

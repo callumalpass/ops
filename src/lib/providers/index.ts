@@ -1,4 +1,4 @@
-import type { ProviderId, RemoteItem, ItemKind } from "../types.js";
+import type { ProviderId, RemoteItem, RemoteKind } from "../types.js";
 import { githubProvider } from "./github.js";
 import { gitlabProvider } from "./gitlab.js";
 import { jiraProvider } from "./jira.js";
@@ -25,15 +25,22 @@ export async function detectProviderRepo(cwd: string, provider: ProviderId = "gi
 }
 
 export async function fetchProviderItem(
-  kind: ItemKind,
+  kind: RemoteKind,
   number: number,
   cwd: string,
   repo?: string,
   provider: ProviderId = "github",
 ): Promise<RemoteItem> {
-  return getProvider(provider).fetchItem({ kind, number, cwd, repo });
+  const item = await getProvider(provider).fetchItem({ kind, number, cwd, repo });
+  return {
+    ...item,
+    key: item.key || String(number),
+  };
 }
 
 export function providerItemRef(item: RemoteItem): string {
+  if (item.provider === "local" || item.kind === "task") {
+    return item.sourcePath ?? item.key ?? item.title;
+  }
   return getProvider(item.provider ?? "github").itemRef(item);
 }

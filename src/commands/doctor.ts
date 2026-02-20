@@ -172,27 +172,30 @@ export function registerDoctor(program: Command): void {
       const repoRoot = resolveRepoRoot(opts.repoRoot);
       const ops = resolveOpsRootMaybe(repoRoot);
       const config = await loadOpsConfig(repoRoot);
-      const provider = config.default_provider ?? "github";
+      const provider = config.default_provider;
+      const providerChecksList = provider
+        ? await providerChecks(provider, repoRoot, config.default_repo)
+        : [];
 
       const [opsCheck, claudeCheck, codexCheck, ...providerSpecific] = await Promise.all([
         checkOpsCollection(ops),
         checkCommandAvailable("claude", repoRoot),
         checkCommandAvailable("codex", repoRoot),
-        ...await providerChecks(provider, repoRoot, config.default_repo),
+        ...providerChecksList,
       ]);
       const checks = [opsCheck, ...providerSpecific, claudeCheck, codexCheck];
 
       const ok = checks.every((c) => c.ok);
 
       if (opts.format === "json") {
-        console.log(JSON.stringify({ ok, provider, repo_root: repoRoot, ops_root: ops, checks }, null, 2));
+        console.log(JSON.stringify({ ok, provider: provider ?? null, repo_root: repoRoot, ops_root: ops, checks }, null, 2));
         process.exit(ok ? 0 : 1);
       }
 
       console.log(chalk.bold("ops doctor"));
       console.log(chalk.dim(`repo: ${repoRoot}`));
       console.log(chalk.dim(`ops:  ${ops}`));
-      console.log(chalk.dim(`provider: ${provider}`));
+      console.log(chalk.dim(`provider: ${provider ?? "(not set)"}`));
       console.log();
 
       for (const check of checks) {

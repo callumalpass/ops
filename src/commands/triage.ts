@@ -6,15 +6,17 @@ import { resolveRepoRoot, resolveOpsRoot } from "../lib/runtime.js";
 import { withCollection } from "../lib/store.js";
 import { printError } from "../lib/cli-output.js";
 import { collect } from "../lib/cli-utils.js";
+import { parseTargetOptions } from "../lib/targets.js";
 import type { AgentCli, ApprovalPolicy, ProviderId, RunMode, SandboxMode } from "../lib/types.js";
 
 export function registerTriage(program: Command): void {
   program
     .command("triage")
-    .description("Run the default triage command for an issue or PR")
+    .description("Run the default triage command for an issue, PR, or task")
     .option("--repo-root <path>", "Repository root")
     .option("--issue <number>", "Issue number")
     .option("--pr <number>", "PR number")
+    .option("--task <ref>", "Task title or path (for example tasks/my-task.md)")
     .option("--repo <scope>", "Provider scope override (for example owner/repo)")
     .option("--provider <provider>", "Provider override (github|gitlab|jira|azure)")
     .option("--command <id>", "Override command id")
@@ -30,22 +32,17 @@ export function registerTriage(program: Command): void {
     .option("--var <key=value>", "Template variable override", collect, [])
     .action(async (opts) => {
       try {
-        if (opts.issue && opts.pr) {
-          throw new Error("Use only one of --issue or --pr.");
-        }
-        if (!opts.issue && !opts.pr) {
-          throw new Error("Provide --issue or --pr.");
-        }
-
-        const kind = opts.issue ? "issue" : "pr";
-        const number = Number.parseInt(opts.issue ?? opts.pr, 10);
-        if (Number.isNaN(number) || number <= 0) {
-          throw new Error("Invalid item number.");
-        }
+        const target = parseTargetOptions(opts, true);
 
         const repoRoot = resolveRepoRoot(opts.repoRoot);
         const config = await loadOpsConfig(repoRoot);
-        const commandId = opts.command || (kind === "issue" ? config.commands.triage_issue : config.commands.review_pr);
+        const commandId = opts.command || (
+          target.kind === "issue"
+            ? config.commands.triage_issue
+            : target.kind === "pr"
+              ? config.commands.review_pr
+              : config.commands.triage_task
+        );
         let mode: RunMode | undefined = opts.mode;
         if (opts.nonInteractive) mode = "non-interactive";
         if (opts.interactive) mode = "interactive";
@@ -63,8 +60,7 @@ export function registerTriage(program: Command): void {
             collection,
             repoRoot,
             commandId,
-            kind,
-            number,
+            target,
             repo,
             provider,
             vars,

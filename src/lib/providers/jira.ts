@@ -106,7 +106,9 @@ export async function fetchJiraItem(input: FetchItemInput): Promise<RemoteItem> 
 }
 
 function itemRef(item: RemoteItem): string {
-  return `${item.repo}-${item.number}`;
+  const repo = item.repo ?? "jira";
+  const number = item.number ?? item.key ?? "?";
+  return `${repo}-${number}`;
 }
 
 export const jiraProvider: ProviderAdapter = {

@@ -9,6 +9,7 @@ OPS_FZF_LIMIT="${OPS_FZF_LIMIT:-100}"
 OPS_FZF_DEFAULT_LIST_MODE="${OPS_FZF_DEFAULT_LIST_MODE:-all}"
 OPS_FZF_ISSUE_STATE="${OPS_FZF_ISSUE_STATE:-}"
 OPS_FZF_PR_STATE="${OPS_FZF_PR_STATE:-}"
+OPS_FZF_INCLUDE_LOCAL_TASKS="${OPS_FZF_INCLUDE_LOCAL_TASKS:-1}"
 
 SCRIPT_PATH="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 SCRIPT_Q="$(printf '%q' "$SCRIPT_PATH")"
@@ -121,7 +122,8 @@ list_items() {
     --limit "$OPS_FZF_LIMIT" \
     --json number,title,state,author,labels,updatedAt,url,isDraft)"
 
-  "$JQ_BIN" -nr \
+  {
+    "$JQ_BIN" -nr \
     --argjson issues "$issue_json" \
     --argjson prs "$pr_json" \
     --arg repo "$repo" \
@@ -168,6 +170,44 @@ list_items() {
         ]
       | @tsv
     '
+    if [[ "$OPS_FZF_INCLUDE_LOCAL_TASKS" == "1" ]]; then
+      list_local_tasks
+    fi
+  } | sort -t $'\t' -k8,8r
+}
+
+frontmatter_value() {
+  local file="$1"
+  local key="$2"
+  local value
+  value="$(sed -n '/^---[[:space:]]*$/,/^---[[:space:]]*$/p' "$file" | sed -n "s/^${key}:[[:space:]]*//p" | head -n 1)"
+  value="${value%\"}"
+  value="${value#\"}"
+  value="${value%\'}"
+  value="${value#\'}"
+  printf "%s" "$value"
+}
+
+list_local_tasks() {
+  local repo_root tasks_dir
+  repo_root="$(get_repo_root)"
+  tasks_dir="$repo_root/.ops/tasks"
+  [[ -d "$tasks_dir" ]] || return 0
+
+  while IFS= read -r file; do
+    local rel title state updated display
+    rel="${file#"$repo_root/.ops/"}"
+    title="$(frontmatter_value "$file" "title")"
+    [[ -n "$title" ]] || title="$(basename "$file" .md)"
+    state="$(frontmatter_value "$file" "status")"
+    [[ -n "$state" ]] || state="open"
+    updated="$(frontmatter_value "$file" "dateModified")"
+    [[ -n "$updated" ]] || updated="$(frontmatter_value "$file" "dateCreated")"
+    [[ -n "$updated" ]] || updated="1970-01-01T00:00:00Z"
+    display="[LOCAL] TASK ${title} [${state}]"
+    printf "%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n" \
+      "$display" "task" "$rel" "local" "$state" "" "" "$updated" "$rel"
+  done < <(find "$tasks_dir" -type f -name '*.md' | sort)
 }
 
 preview_github() {
@@ -213,12 +253,17 @@ preview_github() {
 
 preview_sidecar() {
   local kind="$1"
-  local number="$2"
-  local repo="$3"
+  local key="$2"
+  local repo="${3:-}"
   local repo_root output
   repo_root="$(get_repo_root)"
 
-  if output="$("$OPS_BIN" item show --repo-root "$repo_root" "--$kind" "$number" 2>&1)"; then
+  if [[ "$kind" == "task" ]]; then
+    if output="$("$OPS_BIN" item show --repo-root "$repo_root" --task "$key" 2>&1)"; then
+      printf "%s\n" "$output"
+      return
+    fi
+  elif output="$("$OPS_BIN" item show --repo-root "$repo_root" "--$kind" "$key" 2>&1)"; then
     printf "%s\n" "$output"
     return
   fi
@@ -226,51 +271,85 @@ preview_sidecar() {
   printf "No sidecar found yet.\n\n"
   printf "Press ctrl-s in the list to create/refresh it.\n"
   printf "Manual command:\n"
-  printf "  %s item ensure --repo-root %q --%s %s --repo %s\n\n" "$OPS_BIN" "$repo_root" "$kind" "$number" "$repo"
+  if [[ "$kind" == "task" ]]; then
+    printf "  %s item ensure --repo-root %q --task %q\n\n" "$OPS_BIN" "$repo_root" "$key"
+  else
+    printf "  %s item ensure --repo-root %q --%s %s --repo %s\n\n" "$OPS_BIN" "$repo_root" "$kind" "$key" "$repo"
+  fi
   printf "%s\n" "$output"
+}
+
+preview_task() {
+  local task_ref="$1"
+  local repo_root task_file
+  repo_root="$(get_repo_root)"
+  task_file="$repo_root/.ops/$task_ref"
+  if [[ ! -f "$task_file" ]]; then
+    printf "Task file not found: %s\n" "$task_file"
+    return
+  fi
+  sed -n '1,220p' "$task_file"
 }
 
 preview_item() {
   local kind="$1"
-  local number="$2"
-  local repo="$3"
+  local key="$2"
+  local repo="${3:-}"
 
-  printf "=== GitHub (%s #%s) ===\n\n" "$kind" "$number"
-  preview_github "$kind" "$number" "$repo"
+  if [[ "$kind" == "task" ]]; then
+    printf "=== Local Task (%s) ===\n\n" "$key"
+    preview_task "$key"
+    printf "\n=== Sidecar (.ops) ===\n\n"
+    preview_sidecar "$kind" "$key" "$repo"
+    return
+  fi
+
+  printf "=== GitHub (%s #%s) ===\n\n" "$kind" "$key"
+  preview_github "$kind" "$key" "$repo"
   printf "\n=== Sidecar (.ops) ===\n\n"
-  preview_sidecar "$kind" "$number" "$repo"
+  preview_sidecar "$kind" "$key" "$repo"
 }
 
 sync_sidecar() {
   local kind="$1"
-  local number="$2"
-  local repo="$3"
+  local key="$2"
+  local repo="${3:-}"
   local repo_root
   repo_root="$(get_repo_root)"
-  "$OPS_BIN" item ensure --repo-root "$repo_root" "--$kind" "$number" --repo "$repo" >/dev/null
+  if [[ "$kind" == "task" ]]; then
+    "$OPS_BIN" item ensure --repo-root "$repo_root" --task "$key" >/dev/null
+    return
+  fi
+  "$OPS_BIN" item ensure --repo-root "$repo_root" "--$kind" "$key" --repo "$repo" >/dev/null
 }
 
 open_item_web() {
   local kind="$1"
-  local number="$2"
-  local repo="$3"
-  if [[ "$kind" == "pr" ]]; then
-    "$GH_BIN" pr view "$number" --repo "$repo" --web >/dev/null
+  local key="$2"
+  local repo="${3:-}"
+  if [[ "$kind" == "task" ]]; then
+    printf "local task has no web URL\n" >&2
     return
   fi
-  "$GH_BIN" issue view "$number" --repo "$repo" --web >/dev/null
+  if [[ "$kind" == "pr" ]]; then
+    "$GH_BIN" pr view "$key" --repo "$repo" --web >/dev/null
+    return
+  fi
+  "$GH_BIN" issue view "$key" --repo "$repo" --web >/dev/null
 }
 
 list_commands() {
+  local target_kind="${1:-}"
   local repo_root
   repo_root="$(get_repo_root)"
 
   "$OPS_BIN" command list --repo-root "$repo_root" --format json \
-    | "$JQ_BIN" -r '
+    | "$JQ_BIN" -r --arg target_kind "$target_kind" '
       def clean: tostring | gsub("[\t\r\n]+"; " ");
       .[]
       | .frontmatter as $fm
       | select(($fm.active // true) == true)
+      | select(($target_kind == "") or ($fm.scope == $target_kind) or ($fm.scope == "general"))
       | [
           ($fm.id // ""),
           ($fm.scope // ""),
@@ -293,20 +372,33 @@ preview_command() {
   "$OPS_BIN" command show --repo-root "$repo_root" "$command_id" 2>&1 | sed -n '1,220p'
 }
 
+shortcut_command_for_kind() {
+  local kind="$1"
+  local key="$2"
+  case "$kind:$key" in
+    issue:ctrl-t) printf "triage-issue\n" ;;
+    issue:ctrl-a) printf "address-issue\n" ;;
+    pr:ctrl-p) printf "review-pr\n" ;;
+    task:ctrl-t) printf "triage-task\n" ;;
+    task:ctrl-a) printf "address-task\n" ;;
+    *) printf "\n" ;;
+  esac
+}
+
 pick_command() {
   local kind="$1"
-  local number="$2"
+  local key_ref="$2"
   local repo="$3"
   local key line command_id
   local -a chosen
 
   mapfile -t chosen < <(
-    list_commands | "$FZF_BIN" \
+    list_commands "$kind" | "$FZF_BIN" \
       --ansi \
       --delimiter=$'\t' \
       --with-nth=1 \
       --expect=enter,ctrl-t,ctrl-a,ctrl-p \
-      --header="Pick command for ${kind} #${number} | enter: select | ctrl-t: triage-issue | ctrl-a: address-issue | ctrl-p: review-pr" \
+      --header="Pick command for ${kind} ${key_ref} | enter: select | ctrl-t/ctrl-a: triage/address | ctrl-p: review-pr" \
       --preview="${SCRIPT_Q} __preview-command {2}" \
       --preview-window='right,60%,wrap'
   )
@@ -315,35 +407,40 @@ pick_command() {
   key="${chosen[0]}"
   line="${chosen[1]}"
 
-  case "$key" in
-    ctrl-t) command_id="triage-issue" ;;
-    ctrl-a) command_id="address-issue" ;;
-    ctrl-p) command_id="review-pr" ;;
-    *) IFS=$'\t' read -r _display command_id _scope _description <<<"$line" ;;
-  esac
+  command_id="$(shortcut_command_for_kind "$kind" "$key")"
+  if [[ -z "$command_id" ]]; then
+    IFS=$'\t' read -r _display command_id _scope _description <<<"$line"
+  fi
 
   [[ -n "$command_id" ]] || return 1
-  run_command "$command_id" "$kind" "$number" "$repo"
+  run_command "$command_id" "$kind" "$key_ref" "$repo"
 }
 
 run_command() {
   local command_id="$1"
   local kind="$2"
-  local number="$3"
+  local key_ref="$3"
   local repo="$4"
   local repo_root
   repo_root="$(get_repo_root)"
 
+  if [[ "$kind" == "task" ]]; then
+    exec "$OPS_BIN" run "$command_id" \
+      --repo-root "$repo_root" \
+      --task "$key_ref" \
+      --interactive
+  fi
+
   exec "$OPS_BIN" run "$command_id" \
     --repo-root "$repo_root" \
-    "--$kind" "$number" \
+    "--$kind" "$key_ref" \
     --repo "$repo" \
     --provider github \
     --interactive
 }
 
 pick_item() {
-  local key line kind number repo command_id
+  local key line kind key_ref repo command_id
   local -a chosen
 
   mapfile -t chosen < <(
@@ -356,7 +453,7 @@ pick_item() {
       --bind="ctrl-s:execute-silent(${SCRIPT_Q} __sync-sidecar {2} {3} {4})+reload(${SCRIPT_Q} __list-items)" \
       --bind="ctrl-f:execute-silent(${SCRIPT_Q} __toggle-filter)+reload(${SCRIPT_Q} __list-items)" \
       --bind="ctrl-o:execute-silent(${SCRIPT_Q} __open-web {2} {3} {4})" \
-      --header="enter: command picker | ctrl-t: triage-issue | ctrl-a: address-issue | ctrl-p: review-pr | ctrl-s: sync sidecar | ctrl-f: toggle open/all | ctrl-o: open in browser | ctrl-l: reload" \
+      --header="enter: command picker | ctrl-t/ctrl-a: triage/address (kind-aware) | ctrl-p: review-pr | ctrl-s: sync sidecar | ctrl-f: toggle open/all | ctrl-o: open in browser | ctrl-l: reload" \
       --preview="${SCRIPT_Q} __preview-item {2} {3} {4}" \
       --preview-window='right,65%,wrap'
   )
@@ -364,21 +461,15 @@ pick_item() {
   [[ ${#chosen[@]} -ge 2 ]] || exit 0
   key="${chosen[0]}"
   line="${chosen[1]}"
-  IFS=$'\t' read -r _display kind number repo _state _author _labels _updated _url <<<"$line"
-
-  case "$key" in
-    ctrl-t) command_id="triage-issue" ;;
-    ctrl-a) command_id="address-issue" ;;
-    ctrl-p) command_id="review-pr" ;;
-    *) command_id="" ;;
-  esac
+  IFS=$'\t' read -r _display kind key_ref repo _state _author _labels _updated _url <<<"$line"
+  command_id="$(shortcut_command_for_kind "$kind" "$key")"
 
   if [[ -n "$command_id" ]]; then
-    run_command "$command_id" "$kind" "$number" "$repo"
+    run_command "$command_id" "$kind" "$key_ref" "$repo"
     return
   fi
 
-  pick_command "$kind" "$number" "$repo"
+  pick_command "$kind" "$key_ref" "$repo"
 }
 
 case "${1:-}" in
