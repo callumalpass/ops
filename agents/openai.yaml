@@ -1,0 +1,3 @@
+interface:
+  display_name: "Ops Registry"
+  short_description: "Markdown-first .ops registry with mdbase schemas"

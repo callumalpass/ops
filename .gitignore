@@ -4,3 +4,6 @@ dist/
 *.log
 .claude/
 .ops/
+!assets/ops-registry-template/.ops/
+!assets/ops-registry-template/.ops/**
+assets/ops-registry-template/.ops/.mdbase/
