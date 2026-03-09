@@ -57,20 +57,26 @@ If you want a CLI companion, `mdbase-cli` is useful for validation and queries:
 
 ```bash
 npm install -g mdbase-cli
+cd .ops
 mdbase --help
 ```
 
 Common helpful commands:
 
-- `mdbase validate .ops`
-- `mdbase query 'local_status == "new"' --types item_state .ops`
-- `mdbase read items/example.md .ops`
+- `mdbase validate .`
+- `mdbase query 'local_status == "new"' --types item_state .`
+- `mdbase read items/example.md .`
 
 ## Repo Layout
 
 - `SKILL.md`: the skill instructions
 - `agents/openai.yaml`: optional UI metadata
 - `assets/ops-registry-template/.ops/`: canonical `.ops` template to mirror into target repos
+- `scripts/derive_item_sidecar_path.py`: deterministic item sidecar naming helper
+- `scripts/scaffold_item_sidecar.py`: canonical `item_state` scaffolding helper
+- `scripts/gh_list_missing_items.py`: list GitHub issues or PRs missing sidecars
+- `scripts/gh_seed_missing_items.py`: seed missing GitHub sidecars as `local_status: new`
+- `references/examples.md`: canonical examples for manual record creation
 
 ## Canonical `.ops` Layout
 
@@ -86,6 +92,13 @@ Common helpful commands:
   handoffs/
 ```
 
+## Registry Safety
+
+- Create `.ops/` if it is missing.
+- Copy missing files from the canonical template.
+- Do not overwrite existing records under `items/`, `tasks/`, or `handoffs/` unless the user asks.
+- Do not overwrite `_types/` or `mdbase.yaml` blindly; inspect the diff and preserve repo-specific customizations.
+
 ## Schema Principles
 
 - `item_state` frontmatter holds identifiers, remote metadata, workflow state, and tags.
@@ -93,8 +106,20 @@ Common helpful commands:
 - `task` is intentionally flexible so teams can add local metadata without changing the canonical skill.
 - `handoff` frontmatter handles routing and status; the body holds context.
 
+## Item Identity
+
+- Treat `id` as the canonical identity and update matching sidecars in place.
+- For local tasks, use the repo-relative path as both `key` and `external_ref`.
+- For remote items, prefer the canonical URL as `external_ref`.
+- Use `scripts/derive_item_sidecar_path.py <kind> <external_ref>` to generate the canonical path under `.ops/items/`.
+- Use `scripts/scaffold_item_sidecar.py` to generate a full `item_state` markdown skeleton with the same path and id rules.
+- Use `scripts/gh_list_missing_items.py` and `scripts/gh_seed_missing_items.py` for GitHub repos when you need to discover or seed missing sidecars deterministically.
+- Include `type: item_state`, `type: task`, or `type: handoff` when creating records manually unless tooling writes it for you.
+- Use `references/examples.md` for concrete record shapes.
+
 ## Using The Skill
 
 When an agent is asked to initialize `.ops/` in another repo, it should copy or
-mirror the files from `assets/ops-registry-template/.ops/` into the target repo
-and then validate with the available `mdbase` tooling.
+merge the files from `assets/ops-registry-template/.ops/` into the target repo,
+preserve existing local state, and then validate from inside `.ops/` with the
+available `mdbase` tooling.
